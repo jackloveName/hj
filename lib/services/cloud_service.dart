@@ -121,12 +121,9 @@ class CloudService extends ChangeNotifier implements CloudBridge {
     await session.restore();
     api.baseUrl = settings.baseUrl;
     if (!session.loggedIn) {
-      // 老版本升级上来的用户已经有本机数据：直接认定为本机模式，不被登录页拦住
-      final localData =
-          repository.rawDataOf(Repository.guestDataKey)?.trim() ?? '';
-      if (!session.guestMode && localData.isNotEmpty) {
-        await session.enterGuestMode();
-      }
+      // 数据不保存在本机：没登录就用「空数据 + 不落盘」的游客态启动。
+      // 老版本残留在本机的游客数据不再读进来（登录时会被清掉）。
+      await repository.startFreshGuest();
       _setState(SyncState.local);
       return;
     }
@@ -153,9 +150,13 @@ class CloudService extends ChangeNotifier implements CloudBridge {
         ? await auth.loginWithPassword(phone: phone, password: password ?? '')
         : await auth.loginWithCode(phone: phone, validCode: validCode ?? '');
 
-    // 上一个作用域的数据（通常是游客数据）：登录后按 id 并入账号
-    final previousKey = repository.dataKey;
-    final previousJson = repository.rawDataOf(previousKey);
+    // 只并入「游客作用域」的数据：登录后按 id 并进账号。
+    // 若上一个作用域是别的账号（例如登录态失效后没回到游客作用域），
+    // 绝不能把它的数据带进新账号，否则会出现账号间数据串号。
+    final fromGuest = repository.dataKey == Repository.guestDataKey;
+    final previousJson = fromGuest
+        ? repository.rawDataOf(Repository.guestDataKey)
+        : null;
 
     await session.saveLogin(
       token: token,
@@ -168,6 +169,13 @@ class CloudService extends ChangeNotifier implements CloudBridge {
     _setState(SyncState.syncing);
     try {
       await _mergeAfterLogin(previousJson);
+      // 游客数据已被本账号接管：清掉游客键，
+      // 否则下次登录别的账号又会把这份数据并进去（串号）。
+      if (fromGuest) {
+        await repository.purgeScope(Repository.guestDataKey);
+        // 游客期间拍的照片这时已经归账号了，别让它们被当成"游客临时文件"清掉
+        await repository.forgetGuestMedia();
+      }
       await repository.store.setString(_scopeKey, session.scope);
       await _setPending(false);
       _lastSyncedAt = DateTime.now();
@@ -226,7 +234,9 @@ class CloudService extends ChangeNotifier implements CloudBridge {
     await repository.purgeLocalMedia(
       keep: _mediaRefsOf(Repository.guestDataKey),
     );
-    await repository.purgeScope(Session.dataKeyOf(scope));
+    // 本机数据键是 `zudun.data.v1.<scope>`（见 _useScopeOf），
+    // 用云端键 Session.dataKeyOf 去删本机数据只会删到一个不存在的键，数据其实没被清掉。
+    await repository.purgeScope('${Repository.guestDataKey}.$scope');
     // 清完立即回到空数据；下一次同步会把云端那份拉回来
     await _useScopeOf(scope);
     _setState(_hasPending ? SyncState.pending : SyncState.idle);
@@ -257,9 +267,10 @@ class CloudService extends ChangeNotifier implements CloudBridge {
     // 先删照片文件（本机的直接删，云端的清缓存并请求一起删除），再删数据本体；
     // 反过来的话数据一没，这些文件就再也没人引用了
     await repository.purgeLocalMedia(keep: _mediaRefsOf(Repository.guestDataKey));
-    // 注意用 Session.dataKeyOf 算 key：写死成 `zudun.data.v1.<scope>` 是错的，
-    // 那样删的是一个不存在的键，账号数据会留在本机（重新登录还会被推回云端）
-    await repository.purgeScope(Session.dataKeyOf(scope));
+    // 本机账号数据键是 `zudun.data.v1.<scope>`（见 _useScopeOf）：
+    // 用云端键 Session.dataKeyOf 去删本机数据只会删到一个不存在的键，
+    // 账号数据会留在本机（重新登录还会被推回云端）。
+    await repository.purgeScope('${Repository.guestDataKey}.$scope');
     await repository.store.remove(_scopeKey);
   }
 
@@ -398,11 +409,12 @@ class CloudService extends ChangeNotifier implements CloudBridge {
   }
 
   Future<void> _useScopeOf(String scope) async {
+    final guest = scope == Session.guestScope;
     await repository.useScope(
-      scope == Session.guestScope
-          ? Repository.guestDataKey
-          : '${Repository.guestDataKey}.$scope',
+      guest ? Repository.guestDataKey : '${Repository.guestDataKey}.$scope',
     );
+    // 游客数据只存内存；切到账号作用域（登录后）才重新落盘
+    repository.setLocalPersist(!guest);
   }
 
   // ---------------------------------------------------------------------------
@@ -448,6 +460,9 @@ class CloudService extends ChangeNotifier implements CloudBridge {
 
   Future<void> _clearSessionOnUnauthorized() async {
     await session.clear();
+    // 登录态失效后必须回到游客作用域：否则内存里仍指向旧账号的数据键，
+    // 用户下一次登录会把旧账号的数据并进新账号（串号）。
+    await _useScopeOf(Session.guestScope);
     await _setPending(false);
     _lastError = '登录已失效，请重新登录';
     _setState(SyncState.local);

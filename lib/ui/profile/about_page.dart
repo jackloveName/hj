@@ -5,13 +5,11 @@ import '../../content/legal.dart';
 import '../../data/repository.dart';
 import '../../models/models.dart';
 import '../../services/cloud_service.dart';
-import '../../services/error_log.dart';
 import '../../services/session.dart';
 import '../../theme/tokens.dart';
-import '../auth/account_page.dart';
+import '../auth/account_actions.dart';
 import '../auth/login_page.dart';
 import '../kit.dart';
-import 'error_log_page.dart';
 import 'profile_page.dart';
 
 class AboutPage extends StatelessWidget {
@@ -23,9 +21,6 @@ class AboutPage extends StatelessWidget {
     final cloud = context.watch<CloudService>();
     final session = context.watch<Session>();
     final settings = repository.settings;
-    // 错误日志可能没接（测试环境），用 read 不当依赖
-    final errorCount = context.read<ErrorLog?>()?.entries.length ?? 0;
-
     return ZScreen(
       child: Column(
         children: [
@@ -73,9 +68,6 @@ class AboutPage extends StatelessWidget {
                         icon: Icons.person_outline_rounded,
                         // 编辑资料统一收到「设置」里：头像 / 用户名 / 生日都在弹层里改
                         title: '编辑资料',
-                        subtitle: session.loggedIn
-                            ? '头像 · 用户名 · 生日'
-                            : '登录后可编辑头像、用户名与生日',
                         onTap: () => ProfilePage.showEditProfileSheet(
                           context,
                           repository: repository,
@@ -95,28 +87,29 @@ class AboutPage extends StatelessWidget {
                         ),
                         onTap: () => _pickAppearance(context, repository),
                       ),
-                      ZListRow(
-                        icon: Icons.cloud_sync_outlined,
-                        title: session.loggedIn ? '账号与同步' : '登录 / 注册',
-                        subtitle: session.loggedIn
-                            ? '${session.displayName} · ${cloud.statusLabel}'
-                            : '登录后可在多设备之间同步数据',
-                        onTap: () => zPush(
-                          context,
-                          session.loggedIn
-                              ? const AccountPage()
-                              : const LoginPage(),
+                      // 「账号与同步」页已并进设置：登录后这里直接是退出登录 / 注销账号
+                      if (session.loggedIn) ...[
+                        ZListRow(
+                          icon: Icons.logout_rounded,
+                          title: '退出登录',
+                          onTap: () => logoutAccount(context, cloud),
                         ),
-                      ),
-                      ZListRow(
-                        icon: Icons.bug_report_outlined,
-                        title: '错误日志',
-                        subtitle: errorCount == 0
-                            ? 'App 出问题时可以在这里复制日志'
-                            : '有 $errorCount 条记录，可复制发给客服',
-                        divider: false,
-                        onTap: () => zPush(context, const ErrorLogPage()),
-                      ),
+                        ZListRow(
+                          icon: Icons.person_off_outlined,
+                          title: '注销账号',
+                          titleColor: Z.danger,
+                          // 卡片里最后一行：下面不再画分隔线
+                          divider: false,
+                          onTap: () => destroyAccount(context, cloud),
+                        ),
+                      ] else
+                        ZListRow(
+                          icon: Icons.cloud_sync_outlined,
+                          title: '登录 / 注册',
+                          divider: false,
+                          onTap: () => zPush(context, const LoginPage()),
+                        ),
+                      const SizedBox(height: 3),
                     ],
                   ),
                 ),

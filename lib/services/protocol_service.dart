@@ -7,6 +7,16 @@ import 'api/config_api.dart';
 /// 老用户下次启动会被重新征询同意。
 const String zudunProtocolVersion = '1';
 
+/// 协议正文是一份**模板**（`${name}` = 运营方、`${email}` = 联系邮箱），
+/// 和平台那个 `dm_agreement.html` 用的是同一套占位符。这里换成实际值。
+const String kProtocolOperator = 'Rinze Loop';
+const String kProtocolContactEmail = 'rinzeloop@icloud.com';
+
+/// 把模板里的占位符替换成实际值（没有占位符时原样返回）
+String applyProtocolPlaceholders(String text) => text
+    .replaceAll(RegExp(r'\$\{name\}'), kProtocolOperator)
+    .replaceAll(RegExp(r'\$\{email\}'), kProtocolContactEmail);
+
 /// 协议种类
 enum ProtocolKind {
   /// 隐私政策
@@ -44,9 +54,15 @@ class ProtocolService {
       return cached.text;
     }
     final raw = await _config.readSystemConfig(keyOf(kind));
-    final text = protocolPlainText(raw);
+    final text = applyProtocolPlaceholders(protocolPlainText(raw));
     if (text.isEmpty) {
-      throw ApiException('协议内容暂不可用，请检查网络后重试');
+      // 区分两种情况：服务端成功响应但没配内容（data=null），和真的请求失败。
+      // 前者是平台侧还没配置，提示「检查网络」会让人白折腾。
+      throw ApiException(
+        raw == null
+            ? '协议内容尚未发布，请稍后再试；如需帮助请联系客服'
+            : '协议内容暂不可用，请检查网络后重试',
+      );
     }
     _cache[kind] = (text: text, at: DateTime.now());
     return text;

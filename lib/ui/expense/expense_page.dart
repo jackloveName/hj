@@ -86,7 +86,8 @@ class _ExpensePageState extends State<ExpensePage> {
                 ZSectionTitle(
                   title: '租金日历',
                   icon: Icons.calendar_month_outlined,
-                  moreLabel: monthLabel(key),
+                  // 右上角就写「更多」：月份本身在下面的日历卡里有（切换也点那里）
+                  moreLabel: '更多',
                   onMore: () => _pickMonth(context, property, repository),
                 ),
                 _CalendarCard(
@@ -111,13 +112,17 @@ class _ExpensePageState extends State<ExpensePage> {
                 ZCard(
                   child: Row(
                     children: [
-                      _Part(label: '租金', value: expense.rent),
-                      _Part(
+                      ZStat(label: '租金', value: fmtMoney(expense.rent)),
+                      ZStat(
                         label: '水电燃气',
-                        value: expense.utility,
+                        value: fmtMoney(expense.utility),
                         border: true,
                       ),
-                      _Part(label: '物业网络', value: expense.other, border: true),
+                      ZStat(
+                        label: '物业网络',
+                        value: fmtMoney(expense.other),
+                        border: true,
+                      ),
                     ],
                   ),
                 ),
@@ -1104,42 +1109,6 @@ class _CalendarCard extends StatelessWidget {
       Text(label, style: ZText.small.copyWith(fontSize: 11)),
     ],
   );
-}
-
-class _Part extends StatelessWidget {
-  const _Part({required this.label, required this.value, this.border = false});
-
-  final String label;
-  final double value;
-  final bool border;
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: EdgeInsets.only(left: border ? 11 : 0),
-        decoration: border
-            ? BoxDecoration(
-                border: Border(left: BorderSide(color: Z.line2)),
-              )
-            : null,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label, style: ZText.small.copyWith(fontSize: 11)),
-            const SizedBox(height: 3),
-            Text(
-              fmtMoney(value),
-              style: ZText.label.copyWith(
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 class _RentSheet extends StatelessWidget {

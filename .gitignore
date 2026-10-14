@@ -5,6 +5,9 @@
 .packages
 build/
 
+# 临时的界面截图 / 预览产物（生成完就删，别提交）
+.tmp_preview/
+
 # IDE 配置文件
 .idea/
 .vscode/

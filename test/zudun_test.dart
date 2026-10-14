@@ -26,16 +26,15 @@ import 'package:zudun/services/api/password_crypto.dart';
 import 'package:zudun/services/app_update.dart';
 import 'package:zudun/services/cloud_service.dart';
 import 'package:zudun/services/contract_scanner.dart';
-import 'package:zudun/services/error_log.dart';
 import 'package:zudun/services/notification_plan.dart';
 import 'package:zudun/services/notification_service.dart';
 import 'package:zudun/services/pdf_service.dart';
+import 'package:zudun/services/protocol_service.dart';
 import 'package:zudun/services/session.dart';
 import 'package:zudun/services/watermark.dart';
 import 'package:zudun/theme/app_theme.dart';
 import 'package:zudun/theme/tokens.dart';
 import 'package:zudun/ui/app_update_dialog.dart';
-import 'package:zudun/ui/auth/account_page.dart';
 import 'package:zudun/ui/auth/login_page.dart';
 import 'package:zudun/ui/compare/compare_page.dart';
 import 'package:zudun/ui/evidence/evidence_rooms_page.dart';
@@ -48,8 +47,8 @@ import 'package:zudun/ui/expense/utility_page.dart';
 import 'package:zudun/ui/home/home_page.dart';
 import 'package:zudun/ui/kit.dart';
 import 'package:zudun/ui/media.dart';
+import 'package:zudun/ui/privacy_gate.dart';
 import 'package:zudun/ui/profile/about_page.dart';
-import 'package:zudun/ui/profile/error_log_page.dart';
 import 'package:zudun/ui/profile/legal_guide_page.dart';
 import 'package:zudun/ui/profile/privacy_page.dart';
 import 'package:zudun/ui/profile/profile_page.dart';
@@ -83,6 +82,12 @@ class _FakeNotificationChannel implements NotificationChannel {
 
   @override
   bool get supportsScheduling => true;
+
+  @override
+  Future<String?> diagnose() async => null;
+
+  @override
+  Future<String?> verify(int id) async => null;
 
   @override
   Future<bool> init({required void Function(String? payload) onTap}) async {
@@ -1416,42 +1421,6 @@ void main() {
     expect(await idb.totalBytes(), 0);
   });
 
-  testWidgets('错误日志：记录、落盘、重载、只保留最近 50 条', (tester) async {
-    // 用真实的本机存储（路径由 openTestRepository 里的 mock 提供）
-    final repository = await openTestRepository(tester);
-    final store = repository.store;
-    final log = ErrorLog(store);
-
-    // 落盘是真实文件 IO：必须放进 runAsync，否则 FakeAsync 下会一直挂着
-    await tester.runAsync(() async {
-      log.add(StateError('第一次出错'), stack: StackTrace.current);
-      log.add('第二次出错', note: '未捕获异常');
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-    });
-    expect(log.entries, hasLength(2));
-    expect(log.entries.first.message, contains('第二次出错'));
-
-    final restored = ErrorLog(store)..load();
-    expect(restored.entries, hasLength(2));
-    expect(restored.entries.last.message, contains('第一次出错'));
-
-    // 超过上限只留最近的
-    await tester.runAsync(() async {
-      for (var i = 0; i < 60; i++) {
-        restored.add('第 $i 条');
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-    });
-    expect(restored.entries, hasLength(ErrorLog.maxEntries));
-    expect(restored.entries.first.message, contains('第 59 条'));
-
-    // 复制用的文本 + 清空
-    expect(restored.text, contains('第 59 条'));
-    await tester.runAsync(restored.clear);
-    expect(restored.isEmpty, isTrue);
-    expect(restored.text, '暂无错误记录');
-  });
-
   test('字体分工：界面用子集、PDF 用全量（别弄反）', () {
     final uiRegular = File('assets/fonts/NotoSansSC-Regular.ttf').lengthSync();
     final uiBold = File('assets/fonts/NotoSansSC-Bold.ttf').lengthSync();
@@ -1950,7 +1919,7 @@ void groupApi() {
       expect(cloud.needsLogin, isTrue);
     });
 
-    test('老用户升级：本机已有数据时自动进入本机模式', () async {
+    test('没登录时不再读本机残留数据（游客数据只存内存）', () async {
       final temp = Directory.systemTemp.createTempSync('zudun_upgrade_test');
       addTearDown(() => _cleanTemp(temp));
       const channel = MethodChannel('plugins.flutter.io/path_provider');
@@ -1959,7 +1928,7 @@ void groupApi() {
       messenger.setMockMethodCallHandler(channel, (call) async => temp.path);
       addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
 
-      // 模拟上一版本留下的本机数据
+      // 模拟上一版本留在本机的游客数据
       final first = await Repository.open();
       await first.addProperty(buildProperty());
       expect(first.rawDataOf(Repository.guestDataKey), isNotNull);
@@ -1976,8 +1945,71 @@ void groupApi() {
       );
       addTearDown(cloud.dispose);
       await cloud.restore();
-      expect(session.guestMode, isTrue);
-      expect(cloud.needsLogin, isFalse);
+      // 数据不保存在本机：没登录就是空数据 + 要先去登录，
+      // 那份残留数据不再读进来（登录时会被清掉）
+      expect(repository.properties, isEmpty);
+      expect(session.guestMode, isFalse);
+      expect(cloud.needsLogin, isTrue);
+    });
+
+    test('游客态：写入只进内存，不落盘（重开就是空的）', () async {
+      final temp = Directory.systemTemp.createTempSync('zudun_guest_mem_test');
+      addTearDown(() => _cleanTemp(temp));
+      const channel = MethodChannel('plugins.flutter.io/path_provider');
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (call) async => temp.path);
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+
+      final repository = await Repository.open();
+      final session = Session(repository.store);
+      final cloud = CloudService(
+        repository: repository,
+        session: session,
+        settings: ApiSettings(repository.store),
+        httpClient: MockClient(
+          (request) async => _jsonResponse({'code': '00000', 'data': {}}),
+        ),
+      );
+      addTearDown(cloud.dispose);
+      await cloud.restore();
+
+      await repository.addProperty(buildProperty());
+      expect(repository.properties, hasLength(1));
+      expect(
+        repository.rawDataOf(Repository.guestDataKey),
+        isNull,
+        reason: '游客数据只存内存，不该写进本机存储',
+      );
+
+      // 相当于重启 App：这次会话的数据不会再被读回来
+      final reopened = await Repository.open();
+      expect(reopened.properties, isEmpty);
+    });
+
+    test('游客态：拍的图片也不会留在本机（下次以游客身份启动就清掉）', () async {
+      final temp = Directory.systemTemp.createTempSync('zudun_guest_media_test');
+      addTearDown(() => _cleanTemp(temp));
+      const channel = MethodChannel('plugins.flutter.io/path_provider');
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (call) async => temp.path);
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+
+      final repository = await Repository.open();
+      await repository.startFreshGuest();
+      final ref = await repository.saveMedia(
+        Uint8List.fromList(List<int>.generate(64, (i) => i)),
+        folder: 'p1',
+        name: 'a.jpg',
+      );
+      expect(ref, isNotEmpty);
+      expect(await repository.readMedia(ref), isNotNull, reason: '本次会话要能看得到');
+
+      // 相当于重启 App（仍是游客）：上次那份图片被清掉
+      final again = await Repository.open();
+      await again.startFreshGuest();
+      expect(await again.readMedia(ref), isNull, reason: '游客拍的图片不该留在本机');
     });
   });
 
@@ -2495,10 +2527,8 @@ void groupSmoke() {
     '提醒设置': () => const ReminderSettingsPage(),
     '登录': () => const LoginPage(),
     '押金规则': () => const RulesPage(propertyId: 'p1'),
-    '账号与同步': () => const AccountPage(),
     '隐私与安全': () => const PrivacyPage(),
     '抄表历史': () => const UtilityHistoryPage(propertyId: 'p1'),
-    '错误日志': () => const ErrorLogPage(),
   };
 
   for (final entry in pages.entries) {
@@ -2562,7 +2592,6 @@ Future<void> _pumpSmokePage(
         ChangeNotifierProvider<NotificationService>.value(
           value: NotificationService(),
         ),
-        ChangeNotifierProvider<ErrorLog>.value(value: ErrorLog(repository.store)),
       ],
       child: MaterialApp(
         theme: ZTheme.light(),
@@ -2741,7 +2770,16 @@ Future<Repository> openTestRepository(WidgetTester tester) async {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   messenger.setMockMethodCallHandler(channel, (call) async => temp.path);
   addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
-  return (await tester.runAsync(Repository.open))!;
+  final repository = (await tester.runAsync(Repository.open))!;
+  // 默认当作「用户上次已经同意过协议」：首次启动弹窗是模态的，
+  // 不预置就会挡住其它用例的操作；要验证弹窗本身的用例自己把这条清掉。
+  await tester.runAsync(
+    () => repository.store.setString(
+      kPrivacyConsentKey,
+      zudunProtocolVersion,
+    ),
+  );
+  return repository;
 }
 
 /// 需要 Widget 环境的回归用例
@@ -2915,6 +2953,57 @@ void groupWidgets() {
       find.text('发一条测试通知'),
       findsOneWidget,
       reason: '要留一个入口让用户验证通知到底通不通',
+    );
+  });
+
+  testWidgets('提醒设置：点「发一条测试通知」必须有反馈（不支持说明原因）', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    final notifications = NotificationService(
+      channel: _FakeNotificationChannel(),
+    );
+    addTearDown(notifications.dispose);
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: ChangeNotifierProvider<NotificationService>.value(
+          value: notifications,
+          child: MaterialApp(
+            theme: ZTheme.light(),
+            home: const ReminderSettingsPage(),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    // 打开系统通知开关：测试通知入口这时才出现
+    await tester.tap(find.byType(Switch).first);
+    await tester.pumpAndSettle();
+    expect(repository.settings.systemNotifications, isTrue);
+
+    // 点「发一条测试通知」必须有反馈：成功就告诉用户去哪儿看
+    await tester.tap(find.text('发一条测试通知'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 260));
+    expect(find.textContaining('已发一条测试通知'), findsOneWidget);
+
+    // 环境不支持时也给原因（而不是灰着毫无反应）
+    final offline = NotificationService(
+      channel: _FakeNotificationChannel(supported: false),
+    );
+    addTearDown(offline.dispose);
+    expect(
+      await offline.showTest(),
+      contains('不支持系统通知'),
+      reason: '不支持的环境要说清楚，不能静默返回',
     );
   });
 
@@ -3646,7 +3735,7 @@ void groupWidgets() {
     expect(find.textContaining('数据备份'), findsNothing);
   });
 
-  testWidgets('我的：游客模式不能改资料（点资料卡只给提示）', (tester) async {
+  testWidgets('我的：资料卡不再跳设置，设置走列表里那一行', (tester) async {
     tester.view.physicalSize = const Size(390, 1200);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -3681,24 +3770,75 @@ void groupWidgets() {
     );
     await tester.pumpAndSettle();
 
-    // 游客的资料卡写明「登录后可修改资料」，不再摆「编辑资料」那套文案
+    // 资料卡上不再摆「编辑资料 / 登录后可修改资料」这类文案（整块已去掉）
     expect(find.text('编辑资料'), findsNothing);
-    expect(find.text('登录后可修改资料'), findsOneWidget);
+    expect(find.text('登录后可修改资料'), findsNothing);
 
-    // 点一下：不开编辑弹层，只给一条轻提示
+    // 点资料卡：什么也不发生（只是展示卡）
     await tester.tap(find.text('未设置昵称'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 260));
-    expect(
-      find.text('点击换头像'),
-      findsNothing,
-      reason: '游客不该打开编辑资料弹层',
-    );
-    expect(find.textContaining('游客模式不能修改资料'), findsOneWidget);
-    expect(repository.settings.userName, isEmpty, reason: '资料也不该被改到');
+    await tester.pumpAndSettle();
+    expect(find.byType(AboutPage), findsNothing);
+
+    // 设置还是从列表那一行进
+    await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AboutPage), findsOneWidget);
   });
 
-  testWidgets('设置：游客点「编辑资料」不弹资料弹层，只给提示', (tester) async {
+  testWidgets('我的：全部房源的租房账本（总租金 / 总租住天数 / 平均租金）', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    final session = Session(repository.store);
+    await tester.runAsync(() => seedSmokeData(repository));
+    final settings = ApiSettings(repository.store);
+    final cloud = CloudService(
+      repository: repository,
+      session: session,
+      settings: settings,
+      httpClient: MockClient(
+        (request) async => _jsonResponse({'code': '00000', 'data': {}}),
+      ),
+    );
+    addTearDown(cloud.dispose);
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<Repository>.value(value: repository),
+          ChangeNotifierProvider<Session>.value(value: session),
+          ChangeNotifierProvider<CloudService>.value(value: cloud),
+          Provider<ApiSettings>.value(value: settings),
+          ChangeNotifierProvider<NotificationService>.value(
+            value: NotificationService(),
+          ),
+        ],
+        child: MaterialApp(theme: ZTheme.light(), home: const ProfilePage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    // 两套房合计的已付租金（每套的入住当月都按已付算）
+    final expectedRent =
+        repository.totalPaidRent('p1') + repository.totalPaidRent('p2');
+    expect(find.text('总租金'), findsOneWidget);
+    expect(find.text('总租住天数'), findsOneWidget);
+    expect(find.text('平均租金/天'), findsOneWidget);
+    expect(
+      find.text(fmtMoney(expectedRent)),
+      findsOneWidget,
+      reason: '总租金要等于各房源已付租金之和',
+    );
+    // 有租住天数才会算平均，别显示成 0
+    expect(find.text('0 天'), findsNothing);
+  });
+
+  testWidgets('设置：游客也能编辑资料（只存本机）', (tester) async {
     tester.view.physicalSize = const Size(390, 1200);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -3727,9 +3867,6 @@ void groupWidgets() {
           ChangeNotifierProvider<NotificationService>.value(
             value: NotificationService(),
           ),
-          ChangeNotifierProvider<ErrorLog>.value(
-            value: ErrorLog(repository.store),
-          ),
         ],
         child: MaterialApp(theme: ZTheme.light(), home: const AboutPage()),
       ),
@@ -3743,14 +3880,10 @@ void groupWidgets() {
     expect(find.text('隐私与数据'), findsNothing);
 
     await tester.tap(find.text('编辑资料'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 260));
-    expect(
-      find.text('点击换头像'),
-      findsNothing,
-      reason: '游客不该打开编辑资料弹层',
-    );
-    expect(find.textContaining('游客模式不能修改资料'), findsOneWidget);
+    await tester.pumpAndSettle();
+    // 游客照旧能编辑，只是只落本机；登录后保存才会同步到账号
+    expect(find.text('点击换头像'), findsOneWidget);
+    expect(find.text('生日'), findsOneWidget);
   });
 
   testWidgets('我的：登录后能改用户名与生日，保存后页面跟着变', (tester) async {
@@ -3795,10 +3928,10 @@ void groupWidgets() {
     );
     await tester.pumpAndSettle();
 
-    // 登录后点头像卡 → 设置页（编辑资料现在收在这里）
-    await tester.tap(find.text('小张'));
+    // 设置 → 编辑资料（资料卡已经不再跳设置了）
+    await tester.tap(find.text('设置'));
     await tester.pumpAndSettle();
-    expect(find.byType(AboutPage), findsOneWidget, reason: '资料卡应当跳到设置');
+    expect(find.byType(AboutPage), findsOneWidget);
     await tester.tap(find.text('编辑资料'));
     await tester.pumpAndSettle();
     expect(
@@ -3843,7 +3976,7 @@ void groupWidgets() {
     await tester.pump(const Duration(seconds: 1));
   });
 
-  testWidgets('账号页不显示同步状态；维权指南 tab 与头部留了间距', (tester) async {
+  testWidgets('设置页：账号操作进设置；维权指南 tab 与头部留了间距', (tester) async {
     tester.view.physicalSize = const Size(390, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -3860,6 +3993,15 @@ void groupWidgets() {
       ),
     );
     addTearDown(cloud.dispose);
+    // 退出登录 / 注销账号只在登录后出现在设置里，先模拟登录
+    await tester.runAsync(
+      () => session.saveLogin(
+        token: 'T-1',
+        phone: '13800138000',
+        provider: 'code',
+        user: {'nickName': '小张'},
+      ),
+    );
 
     await tester.pumpWidget(
       MultiProvider(
@@ -3869,7 +4011,7 @@ void groupWidgets() {
           ChangeNotifierProvider<CloudService>.value(value: cloud),
           Provider<ApiSettings>.value(value: settings),
         ],
-        child: MaterialApp(theme: ZTheme.light(), home: const AccountPage()),
+        child: MaterialApp(theme: ZTheme.light(), home: const AboutPage()),
       ),
     );
     await tester.pumpAndSettle();
@@ -4435,9 +4577,6 @@ void groupWidgets() {
             ChangeNotifierProvider<Session>.value(value: session),
             ChangeNotifierProvider<CloudService>.value(value: cloud),
             Provider<ApiSettings>.value(value: settings),
-            ChangeNotifierProvider<ErrorLog>.value(
-              value: ErrorLog(repository.store),
-            ),
           ],
           child: MaterialApp(
             theme: ZTheme.light(),
@@ -4995,6 +5134,115 @@ void groupWidgets() {
     expect(find.text('¥800'), findsWidgets);
   });
 
+  test('协议模板：\${name} / \${email} 换成运营方与联系邮箱', () {
+    expect(
+      applyProtocolPlaceholders('本协议由 \${name} 提供，联系 \${email}。'),
+      '本协议由 Rinze Loop 提供，联系 rinzeloop@icloud.com。',
+    );
+    // 多处出现要全部替换
+    expect(
+      applyProtocolPlaceholders('\${name} 保留所有权利，可邮件 \${email} 联系 \${name}。'),
+      'Rinze Loop 保留所有权利，可邮件 rinzeloop@icloud.com 联系 Rinze Loop。',
+    );
+    // 没有占位符时原样返回
+    expect(applyProtocolPlaceholders('普通正文'), '普通正文');
+  });
+
+  testWidgets('首次启动弹隐私弹窗：同意后记下版本，重启不再弹', (tester) async {
+    tester.view.physicalSize = const Size(390, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    final session = Session(repository.store);
+    final settings = ApiSettings(repository.store);
+    final cloud = CloudService(
+      repository: repository,
+      session: session,
+      settings: settings,
+      httpClient: MockClient(
+        (request) async => _jsonResponse({'code': '00000', 'data': {}}),
+      ),
+    );
+    addTearDown(cloud.dispose);
+
+    Future<void> pumpApp() async {
+      await tester.pumpWidget(
+        ZudunApp(
+          repository: repository,
+          session: session,
+          cloud: cloud,
+          notifications: NotificationService(),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    // 这条用例专门验证首启弹窗：把「已同意」清掉
+    await tester.runAsync(() => repository.store.remove(kPrivacyConsentKey));
+
+    await pumpApp();
+    expect(find.text('服务协议和隐私政策'), findsOneWidget);
+    expect(find.text('同意并接受'), findsOneWidget);
+
+    await tester.tap(find.text('同意并接受'));
+    await tester.pumpAndSettle();
+    expect(find.text('服务协议和隐私政策'), findsNothing);
+    expect(
+      repository.store.getString(kPrivacyConsentKey),
+      zudunProtocolVersion,
+      reason: '同意后要把协议版本记在本机',
+    );
+
+    // 协议版本没变 → 下次启动不再打扰。
+    // 先把整棵树换掉再挂 App，否则 State 会复用、等于没重启。
+    await tester.pumpWidget(const SizedBox.shrink());
+    await pumpApp();
+    expect(find.text('服务协议和隐私政策'), findsNothing);
+  });
+
+  testWidgets('隐私弹窗：暂不同意走二次确认，同意并继续也会记下', (tester) async {
+    tester.view.physicalSize = const Size(390, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    final session = Session(repository.store);
+    final settings = ApiSettings(repository.store);
+    final cloud = CloudService(
+      repository: repository,
+      session: session,
+      settings: settings,
+      httpClient: MockClient(
+        (request) async => _jsonResponse({'code': '00000', 'data': {}}),
+      ),
+    );
+    addTearDown(cloud.dispose);
+
+    // 这条用例专门验证「暂不同意」的二次确认：把「已同意」清掉
+    await tester.runAsync(() => repository.store.remove(kPrivacyConsentKey));
+
+    await tester.pumpWidget(
+      ZudunApp(
+        repository: repository,
+        session: session,
+        cloud: cloud,
+        notifications: NotificationService(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('暂不同意'));
+    await tester.pumpAndSettle();
+    expect(find.text('确认提示'), findsOneWidget);
+    expect(find.text('退出应用'), findsOneWidget);
+
+    await tester.tap(find.text('同意并继续'));
+    await tester.pumpAndSettle();
+    expect(find.text('确认提示'), findsNothing);
+    expect(repository.store.getString(kPrivacyConsentKey), zudunProtocolVersion);
+  });
+
   testWidgets('登录页：渲染正常且未同意隐私说明时不提交', (tester) async {
     tester.view.physicalSize = const Size(390, 900);
     tester.view.devicePixelRatio = 1;
@@ -5137,17 +5385,15 @@ void groupWidgets() {
         ],
         child: MaterialApp(
           theme: ZTheme.light(),
-          home: const AccountPage(),
+          home: const AboutPage(),
         ),
       ),
     );
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    expect(find.text('小张'), findsWidgets);
-    expect(find.text('138****8000'), findsOneWidget);
     expect(find.text('退出登录'), findsOneWidget);
     expect(find.text('注销账号'), findsOneWidget);
-    // 账号页只展示用户信息，不再展示同步细节与服务器地址
+    // 「账号与同步」页已并进设置：不再摆同步细节与服务器地址
     expect(find.text('数据同步'), findsNothing);
     expect(find.text('服务器地址'), findsNothing);
     expect(find.text('上次同步'), findsNothing);

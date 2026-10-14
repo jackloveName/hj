@@ -8,6 +8,7 @@ import 'kit.dart';
 
 /// 协议弹层：正文只从服务端取（`ZD_PRIVACY_PROTOC` / `ZD_REGISTER_PROTOC`），
 /// 不做本地兜底；加载失败给「重试」，不拿旧文本顶上。
+///
 Future<void> showProtocolSheet(BuildContext context, ProtocolKind kind) =>
     showModalBottomSheet<void>(
       context: context,

@@ -8,13 +8,13 @@ import 'data/repository.dart';
 import 'models/models.dart';
 import 'services/api/api_settings.dart';
 import 'services/cloud_service.dart';
-import 'services/error_log.dart';
 import 'services/notification_service.dart';
 import 'services/session.dart';
 import 'theme/app_theme.dart';
 import 'theme/tokens.dart';
 import 'ui/app_update_dialog.dart';
 import 'ui/auth/login_page.dart';
+import 'ui/privacy_gate.dart';
 import 'ui/shell.dart';
 
 class ZudunApp extends StatelessWidget {
@@ -24,7 +24,6 @@ class ZudunApp extends StatelessWidget {
     required this.session,
     required this.cloud,
     required this.notifications,
-    this.errorLog,
   });
 
   final Repository repository;
@@ -34,8 +33,6 @@ class ZudunApp extends StatelessWidget {
   /// 系统通知服务（浏览器不支持时它自己会降级成「只发应用内提醒」）
   final NotificationService notifications;
 
-  /// 本机错误日志（可选：测试里可以不传）
-  final ErrorLog? errorLog;
 
   @override
   Widget build(BuildContext context) {
@@ -48,8 +45,6 @@ class ZudunApp extends StatelessWidget {
         ChangeNotifierProvider<NotificationService>.value(
           value: notifications,
         ),
-        if (errorLog != null)
-          ChangeNotifierProvider<ErrorLog>.value(value: errorLog!),
       ],
       child: _AppearanceWatcher(
         repository: repository,
@@ -209,7 +204,12 @@ class _StartupGateState extends State<_StartupGate> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _checkUpdate());
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // 首次启动（或协议版本更新后）先征询同意：对齐应用市场合规要求
+      await ensurePrivacyConsent(context);
+      if (!mounted) return;
+      await _checkUpdate();
+    });
   }
 
   /// 启动时静默检查版本更新：请求失败、没有新版都安静放过

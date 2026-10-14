@@ -36,6 +36,13 @@ abstract class NotificationChannel {
 
   /// 打开系统的通知设置页（被拒绝后让用户能一键去开）
   Future<bool> openSystemSettings();
+
+  /// 自检：返回「为什么发不出来」的人话说明；一切正常返回 null。
+  /// 「测试通知」用它给出可执行的提示，而不是静默失败。
+  Future<String?> diagnose();
+
+  /// 发送后的复核：正常返回 null，否则返回原因（查不到就不下结论）
+  Future<String?> verify(int id);
 }
 
 /// 真机实现：flutter_local_notifications
@@ -208,6 +215,52 @@ class LocalNotificationChannel implements NotificationChannel {
       }
     } catch (_) {
       return false;
+    }
+  }
+
+  @override
+  Future<String?> diagnose() async {
+    if (kIsWeb) {
+      final web = _plugin
+          .resolvePlatformSpecificImplementation<
+            WebFlutterLocalNotificationsPlugin
+          >();
+      if (web == null) return '当前浏览器不支持系统通知';
+      return switch (web.permissionStatus) {
+        WebNotificationPermission.granted => null,
+        WebNotificationPermission.denied =>
+          '浏览器已拒绝通知：点地址栏左侧的站点设置，把「通知」改成允许',
+        _ => '浏览器还没允许通知：先打开上面的开关授权',
+      };
+    }
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        final android = _plugin
+            .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin
+            >();
+        if (android == null) return null;
+        if (await android.areNotificationsEnabled() == false) {
+          return '系统里把「租盾」的通知关掉了：去系统设置 → 应用 → 租盾 → 通知，打开它';
+        }
+        return null;
+      default:
+        return null;
+    }
+  }
+
+  @override
+  Future<String?> verify(int id) async {
+    // 浏览器没有「查已发通知」的接口，只能靠用户看
+    if (kIsWeb) return null;
+    try {
+      final active = await _plugin.getActiveNotifications();
+      if (active.isEmpty) return null; // 查不到就不乱下结论
+      if (active.any((item) => item.id == id)) return null;
+      return '系统没接收这条通知：检查系统的「请勿打扰」，'
+          '或把「$_channelName」这个通知类别改成「允许打扰」';
+    } catch (_) {
+      return null;
     }
   }
 

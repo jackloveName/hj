@@ -100,14 +100,35 @@ class NotificationService extends ChangeNotifier {
     }
   }
 
-  /// 直接弹一条，用来验证「系统通知到底通不通」
-  Future<void> showTest() async {
-    if (!await ensureReady()) return;
-    await _show(
-      id: notificationId('test|${DateTime.now().millisecondsSinceEpoch}'),
-      title: '租盾提醒已开启',
-      body: '到交租、合同到期、抄表的日子，我会在这里提醒你。',
-    );
+  /// 直接弹一条，用来验证「系统通知到底通不通」。
+  ///
+  /// 返回给界面提示的文案：成功了说去哪儿看，没成功说明为什么
+  /// —— 以前这里失败是静默 return，用户按了以为按钮坏了。
+  Future<String> showTest() async {
+    if (!await ensureReady()) {
+      return isWeb
+          ? '当前浏览器不支持系统通知（需要 HTTPS 且浏览器允许通知）；'
+                '到点仍会在应用内提醒你'
+          : '当前平台不支持系统通知；到点仍会在应用内提醒你'
+                '${_lastError == null ? '' : '（$_lastError）'}';
+    }
+    // 先自检：没授权、系统把通知关了、通知类别被静音，这里都会给出具体原因
+    final blocked = await _channel.diagnose();
+    if (blocked != null) return blocked;
+    final id = notificationId('test|${DateTime.now().millisecondsSinceEpoch}');
+    try {
+      await _show(
+        id: id,
+        title: '租盾提醒已开启',
+        body: '到交租、合同到期、抄表的日子，我会在这里提醒你。',
+      );
+    } catch (error) {
+      _lastError = '$error';
+      notifyListeners();
+      return '发送失败：$error';
+    }
+    // 复核一下系统到底收没收到（安卓能查「当前展示中的通知」）
+    return await _channel.verify(id) ?? '已发一条测试通知：下拉通知栏看看';
   }
 
   /// 去系统设置里开通知（被拒绝后给用户一个直达入口）

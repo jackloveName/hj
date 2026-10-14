@@ -118,6 +118,73 @@ class TenancyPage extends StatelessWidget {
   }
 }
 
+/// 封面上的两个胶囊（状态 / 到期）：真照片与内置底图共用一套
+Widget _coverOverlay(Property property, int daysLeft) => Stack(
+  children: [
+    Positioned(
+      left: 10,
+      top: 10,
+      child: ZPill(
+        label: property.status.label,
+        background: statusPillColor(property.status),
+        foreground: Colors.white,
+      ),
+    ),
+    Positioned(
+      right: 10,
+      top: 10,
+      child: ZPill(
+        // 当天到期别写「还有 0 天到期」
+        label: daysLeft < 0
+            ? '已到期'
+            : (daysLeft == 0 ? '今天到期' : '还有 $daysLeft 天到期'),
+        background: Z.scrimNavy,
+        foreground: Colors.white,
+      ),
+    ),
+  ],
+);
+
+/// 房源卡片的固定封面（由 `tool/generate_property_cover.dart` 生成）。
+/// 下面压一层自下而上的暗角：水印文字是白的，底图不能太亮。
+class _DefaultCover extends StatelessWidget {
+  const _DefaultCover({required this.watermark, required this.overlay});
+
+  final List<String> watermark;
+  final Widget overlay;
+
+  static const String asset = 'assets/images/property_cover.png';
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Image.asset(asset, fit: BoxFit.cover),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.bottomCenter,
+              end: Alignment.topCenter,
+              colors: [
+                Z.scrimNavy,
+                Z.scrimNavy.withValues(alpha: 0.35),
+                Colors.transparent,
+              ],
+              stops: const [0, 0.55, 1],
+            ),
+          ),
+        ),
+        Align(
+          alignment: Alignment.bottomLeft,
+          child: ZWatermarkBar(lines: watermark),
+        ),
+        overlay,
+      ],
+    );
+  }
+}
+
 /// 左上角的房源切换器：显示当前在租这套的名字，点一下换房。
 /// 只有一套在租时不摆下拉箭头（没得换），历史入口仍留在右侧。
 class _PropertySwitcher extends StatelessWidget {
@@ -460,39 +527,11 @@ class _CurrentCard extends StatelessWidget {
         children: [
           SizedBox(
             height: 108,
-            child: ZPhoto(
-              ref: property.coverRef,
-              radius: 0,
-              watermark: [
-                property.name,
-                // 户型与面积不再上卡片（用户只要看「这是哪套房」）
-                property.address,
-              ],
-              overlay: Stack(
-                children: [
-                  Positioned(
-                    left: 10,
-                    top: 10,
-                    child: ZPill(
-                      label: property.status.label,
-                      background: statusPillColor(property.status),
-                      foreground: Colors.white,
-                    ),
-                  ),
-                  Positioned(
-                    right: 10,
-                    top: 10,
-                    child: ZPill(
-                      // 当天到期别写「还有 0 天到期」
-                      label: daysLeft < 0
-                          ? '已到期'
-                          : (daysLeft == 0 ? '今天到期' : '还有 $daysLeft 天到期'),
-                      background: Z.scrimNavy,
-                      foreground: Colors.white,
-                    ),
-                  ),
-                ],
-              ),
+            // 封面固定用内置底图：有没有照片都显示这张，
+            // 房源名与地址由底图上的水印负责（和 ZPhoto 的水印同一套样式）
+            child: _DefaultCover(
+              watermark: [property.name, property.address],
+              overlay: _coverOverlay(property, daysLeft),
             ),
           ),
           // 下一步：把最该先做的那件事摆出来，点一下就到对应的页面
@@ -508,15 +547,17 @@ class _CurrentCard extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(15, 12, 15, 0),
             child: Row(
               children: [
-                _Metric(
+                ZStat(
                   label: '月租',
                   value: fmtMoney(property.contract.monthlyRent),
+                  valueSize: 14,
                 ),
-                _Metric(
+                ZStat(
                   label: daysIn < 0 ? '距入住' : '已住',
                   value: '${daysIn.abs()} 天',
+                  valueSize: 14,
                 ),
-                _Metric(label: '取证照片', value: '$photos 张'),
+                ZStat(label: '取证照片', value: '$photos 张', valueSize: 14),
               ],
             ),
           ),
@@ -937,36 +978,6 @@ class _Fact extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _Metric extends StatelessWidget {
-  const _Metric({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: ZText.small.copyWith(fontSize: 11)),
-          const SizedBox(height: 3),
-          Text(
-            value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: ZText.label.copyWith(
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-              color: Z.ink,
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

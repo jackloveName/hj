@@ -5,7 +5,6 @@ import 'app.dart';
 import 'data/repository.dart';
 import 'services/api/api_settings.dart';
 import 'services/cloud_service.dart';
-import 'services/error_log.dart';
 import 'services/notification_service.dart';
 import 'services/session.dart';
 import 'services/token_store.dart';
@@ -18,8 +17,6 @@ Future<void> main() async {
   // 会话、接口配置与云端同步都与 Repository 共用一个本机存储实例，
   // 避免两个写入方互相覆盖
   final settings = ApiSettings(repository.store);
-  // 本机错误日志：没有接崩溃上报服务，至少让用户能把出错信息发出来
-  final errorLog = ErrorLog(repository.store)..install();
   final session = Session(
     repository.store,
     // 移动端把访问凭证放进 Keychain / Keystore，其它平台沿用本机存储
@@ -39,7 +36,6 @@ Future<void> main() async {
       session: session,
       cloud: cloud,
       notifications: notifications,
-      errorLog: errorLog,
     ),
   );
 }

@@ -46,6 +46,9 @@ flutter:
   assets:
     # 界面资源
     - assets/fonts/
+    # 租住页房源卡片的默认底图（没有封面照片时用），
+    # 由 tool/generate_property_cover.dart 生成，换图重跑脚本即可
+    - assets/images/
     # PDF 导出用的全量中文字体（只给 rootBundle 按需读取，界面字体家族不引用它，
     # 所以 Web 上只有真的导出 PDF 时才下载）
     - assets/fonts/pdf/

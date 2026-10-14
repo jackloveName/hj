@@ -100,9 +100,12 @@ class ReminderSettingsPage extends StatelessWidget {
                           ),
                         const SizedBox(height: 4),
                         TextButton.icon(
-                          onPressed: notifications.available
-                              ? () => notifications.showTest()
-                              : null,
+                          // 环境不支持时也让人点：点了会说清楚为什么没弹。
+                          // 灰着不给原因，最容易让人以为「这按钮点了没用」。
+                          onPressed: () async {
+                            final message = await notifications.showTest();
+                            if (context.mounted) zToast(context, message);
+                          },
                           icon: const Icon(
                             Icons.notifications_none_rounded,
                             size: 18,

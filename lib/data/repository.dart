@@ -60,6 +60,10 @@ class Repository extends ChangeNotifier {
   bool _readOnly = false;
   String? _readOnlyNotice;
 
+  /// 是否把数据写进本机存储。
+  /// 游客模式为 false：数据只活在内存里，退出 App 就没了（登录后由账号接管）。
+  bool _persistEnabled = true;
+
   static Future<Repository> open() async {
     final store = await LocalStore.open();
     final media = await MediaStore.open();
@@ -151,6 +155,23 @@ class Repository extends ChangeNotifier {
     await _load();
   }
 
+  /// 是否把数据落盘。游客模式要关掉（数据只存内存）。
+  void setLocalPersist(bool enabled) => _persistEnabled = enabled;
+
+  /// 用「空数据 + 不落盘」的游客态启动：
+  /// 本机残留的游客数据不再读进来（登录时会被清掉），退出 App 即视为清空。
+  Future<void> startFreshGuest() async {
+    // 上一次游客会话留下的图片：一并清掉（记录早就不落盘了，图片也不能留）
+    await purgeGuestMedia();
+    _clearInMemory();
+    _readOnly = false;
+    _readOnlyNotice = null;
+    _lastError = null;
+    _persistEnabled = false;
+    _invalidateDerived();
+    notifyListeners();
+  }
+
   void _apply(Map<String, dynamic> map) {
     // 数据版本校验：避免旧版应用直接读取更高版本的结构
     final incomingVersion = map['version'];
@@ -232,6 +253,13 @@ class Repository extends ChangeNotifier {
     if (_readOnly) {
       // 只读保护：一次都不写回，磁盘上那份新版本数据保持原样
       _lastError = _readOnlyNotice;
+      _invalidateDerived();
+      notifyListeners();
+      return;
+    }
+    if (!_persistEnabled) {
+      // 游客态：只改内存，不写存储
+      _lastError = null;
       _invalidateDerived();
       notifyListeners();
       return;
@@ -762,6 +790,8 @@ class Repository extends ChangeNotifier {
     try {
       // 先落本机：断网 / 未登录时照片依然可用
       localRef = await _media.saveBytes(bytes, folder: folder, name: name);
+      // 游客态：图片也不留在本机 —— 记一笔，下次以游客身份启动时删掉
+      if (!_persistEnabled) await _rememberGuestMedia(localRef);
       _mediaBytes = await _media.usedBytes();
       if (!_media.lastWritePersisted) {
         _lastError =
@@ -786,6 +816,45 @@ class Repository extends ChangeNotifier {
       return localRef;
     }
   }
+
+  /// 游客态写过的图片文件（下次以游客身份启动时删掉，见 [purgeGuestMedia]）
+  static const String _guestMediaKey = 'zudun.guest_media';
+
+  Future<void> _rememberGuestMedia(String ref) async {
+    if (ref.isEmpty) return;
+    final list = _guestMediaRefs()..add(ref);
+    await _store.setString(_guestMediaKey, jsonEncode(list));
+  }
+
+  List<String> _guestMediaRefs() {
+    final raw = _store.getString(_guestMediaKey);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is List) return decoded.map((item) => '$item').toList();
+    } catch (_) {
+      // 记坏了就当没有：图片文件本来就只是缓存
+    }
+    return [];
+  }
+
+  /// 清掉游客态留下的图片：记录已经不落盘了，图片也不能留
+  Future<void> purgeGuestMedia() async {
+    final refs = _guestMediaRefs();
+    if (refs.isEmpty) return;
+    await _store.remove(_guestMediaKey);
+    for (final ref in refs) {
+      try {
+        await _media.delete(ref);
+      } catch (_) {
+        // 文件已经不在了也无所谓
+      }
+    }
+    _mediaBytes = await _media.usedBytes();
+  }
+
+  /// 游客数据已经交给账号：这些图片从此算账号的，别再当"游客临时文件"清掉
+  Future<void> forgetGuestMedia() => _store.remove(_guestMediaKey);
 
   Future<Uint8List?> readMedia(String ref) {
     if (!OssRef.isRemote(ref)) return _media.read(ref);

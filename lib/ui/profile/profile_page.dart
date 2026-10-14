@@ -17,6 +17,32 @@ import 'privacy_page.dart';
 import 'reminder_settings_page.dart';
 import 'templates_page.dart';
 
+/// 全部房源的租房账本：总租金、总租住天数，以及由此算出的平均租金/天
+class _RentSummaryCard extends StatelessWidget {
+  const _RentSummaryCard({required this.totalRent, required this.totalDays});
+
+  final double totalRent;
+  final int totalDays;
+
+  @override
+  Widget build(BuildContext context) {
+    return ZCard(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ZStat(label: '总租金', value: fmtMoney(totalRent)),
+          ZStat(label: '总租住天数', value: '$totalDays 天', border: true),
+          ZStat(
+            label: '平均租金/天',
+            value: totalDays > 0 ? fmtMoney(totalRent / totalDays) : '—',
+            border: true,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// SCREEN 08 · 我的 · 设置与维权
 /// 头像：有图显示图，没有就是品牌渐变 + 人像图标
 class _Avatar extends StatelessWidget {
@@ -64,6 +90,8 @@ class ProfilePage extends StatelessWidget {
 
     final session = context.watch<Session>();
     final settings = repository.settings;
+    // 全部房源的租房账本：总租金 / 总租住天数（平均租金由这两个算出来）
+    final summary = _allPropertiesSummary(repository);
 
     return ZScreen(
       child: Column(
@@ -75,11 +103,7 @@ class ProfilePage extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
               children: [
                 ZCard(
-                  // 编辑资料已经收进「设置」：点资料卡直接跳过去；
-                  // 游客点了只说清原因（游客模式下的资料不能改）
-                  onTap: session.loggedIn
-                      ? () => zPush(context, const AboutPage())
-                      : () => zToast(context, '游客模式不能修改资料，登录后即可编辑'),
+                  // 资料卡只做展示，不再跳设置（设置走列表里那一行）
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
@@ -96,43 +120,40 @@ class ProfilePage extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: ZText.title3.copyWith(fontSize: 17),
                       ),
-                      const SizedBox(height: 4),
-                      // 第三行：流浪天数
-                      Text(
-                        '你已流浪 ${session.daysSinceFirstSeen} 天',
-                        style: ZText.small.copyWith(fontSize: 12),
-                      ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 6),
+                      // 第三行：流浪天数（图标与首页那一行保持一致）
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
-                            session.loggedIn
-                                ? Icons.edit_outlined
-                                : Icons.lock_outline_rounded,
+                            Icons.explore_outlined,
                             size: 13,
                             color: Z.ink4,
                           ),
                           const SizedBox(width: 4),
                           Text(
-                            session.loggedIn
-                                ? '资料在「设置」里编辑'
-                                : '登录后可修改资料',
-                            style: ZText.micro.copyWith(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w400,
-                            ),
+                            '你已流浪 ${session.daysSinceFirstSeen} 天',
+                            style: ZText.small.copyWith(fontSize: 12),
                           ),
                         ],
                       ),
                     ],
                   ),
                 ),
+                // 全部房源的租房账本（一套都没有时不摆，免得全是 0）
+                if (repository.properties.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  _RentSummaryCard(
+                    totalRent: summary.rent,
+                    totalDays: summary.days,
+                  ),
+                ],
                 const SizedBox(height: 10),
                 // 游客模式：先把「数据只在本机」讲清楚，再给一个登录入口
                 if (!session.loggedIn) ...[
                   ZHintBar(
-                    text: '游客模式：数据只保存在这台设备，换机或清理浏览器数据就找不回来了。',
+                    text: '游客模式：数据只保留在本次使用中，退出 App 就清空；'
+                        '登录后才会保存到账号。',
                     icon: Icons.phone_iphone_rounded,
                     trailing: TextButton(
                       onPressed: () => zPush(context, const LoginPage()),
@@ -163,7 +184,6 @@ class ProfilePage extends StatelessWidget {
                       ZListRow(
                         icon: Icons.dark_mode_outlined,
                         title: '深色模式',
-                        subtitle: _appearanceHint(settings.appearance),
                         // 开关反映的是「当前实际是不是深色」，
                         // 切换后会把外观固定成浅色或深色（想跟随系统去「设置」里改）
                         trailing: Switch(
@@ -175,24 +195,32 @@ class ProfilePage extends StatelessWidget {
                       ZListRow(
                         icon: Icons.notifications_none_rounded,
                         title: '提醒设置',
-                        subtitle:
-                            '交租提前 ${settings.reminders.rentDaysAhead} 天 · '
-                            '到期提前 ${settings.reminders.contractDaysAhead.join('/')} 天',
+                        divider: false,
                         onTap: () =>
                             zPush(context, const ReminderSettingsPage()),
                       ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                // 维权相关的两页单独一张卡：和上面的「常用开关」分开，别混在一起
+                ZCard(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 15,
+                    vertical: 3,
+                  ),
+                  child: Column(
+                    children: [
                       ZListRow(
                         icon: Icons.balance_outlined,
                         title: '租房法规指南',
-                        subtitle: '押金退还 · 房东义务 · 纠纷流程',
                         onTap: () => zPush(context, const LegalGuidePage()),
                       ),
                       ZListRow(
                         icon: Icons.description_outlined,
                         title: '维权文书模板',
-                        subtitle: '催告函 · 投诉信 · 起诉状',
-                        onTap: () => zPush(context, const TemplatesPage()),
                         divider: false,
+                        onTap: () => zPush(context, const TemplatesPage()),
                       ),
                     ],
                   ),
@@ -213,29 +241,30 @@ class ProfilePage extends StatelessWidget {
                       ZListRow(
                         icon: Icons.tune_rounded,
                         title: '设置',
-                        subtitle: '外观、昵称、账号与同步',
                         divider: false,
                         onTap: () => zPush(context, const AboutPage()),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 18),
-                Center(
-                  child: Text(
-                    session.loggedIn
-                        ? '已开启云端同步 · 换机后登录同一账号即可恢复\n本机同时保留一份'
-                        : '所有照片与合同数据仅存于本机\n不上传服务器 · 无需登录即可使用',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontFamily: Z.font,
-                      fontFamilyFallback: Z.fallback,
-                      fontSize: 11,
-                      height: 1.7,
-                      color: Z.ink4,
+                // 登录后不再摆云同步那行说明（默认行为，不用天天讲）；
+                // 游客这行要留着：数据退出即清，得先讲清楚
+                if (!session.loggedIn) ...[
+                  const SizedBox(height: 18),
+                  Center(
+                    child: Text(
+                      '游客模式的数据不保存在本机\n登录账号后才会保存到账号里',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontFamily: Z.font,
+                        fontFamilyFallback: Z.fallback,
+                        fontSize: 11,
+                        height: 1.7,
+                        color: Z.ink4,
+                      ),
                     ),
                   ),
-                ),
+                ],
               ],
             ),
           ),
@@ -243,13 +272,6 @@ class ProfilePage extends StatelessWidget {
       ),
     );
   }
-
-  /// 开关下面的那行说明：说清当前是跟随系统还是已固定
-  static String _appearanceHint(AppAppearance appearance) => switch (appearance) {
-    AppAppearance.system => '当前跟随系统 · 想固定在「设置」里改',
-    AppAppearance.light => '已固定浅色',
-    AppAppearance.dark => '已固定深色',
-  };
 
   /// 明暗切换：以「现在实际显示的是不是深色」为基准反过来
   static Future<void> _toggleDark(
@@ -272,23 +294,39 @@ class ProfilePage extends StatelessWidget {
   }
 
   /// 头像：云端头像优先，其次本机存的那张
+  /// 所有房源的合计：已付租金 + 租住天数。
+  /// 在租的算到今天，已退租 / 纠纷的算到合同到期日（更接近「租住结束」）；
+  /// 天数按自然日算，负数（还没入住）不算进去。
+  static ({double rent, int days}) _allPropertiesSummary(
+    Repository repository,
+  ) {
+    var rent = 0.0;
+    var days = 0;
+    final today = DateTime.now();
+    for (final property in repository.properties) {
+      rent += repository.totalPaidRent(property.id);
+      final end = property.status == PropertyStatus.active
+          ? today
+          : property.contract.contractEnd;
+      final lived = daysBetween(property.contract.moveInDate, end);
+      if (lived > 0) days += lived;
+    }
+    return (rent: rent, days: days);
+  }
+
   static String _avatarRefOf(AppSettings settings, Session session) =>
       session.avatarPath.isNotEmpty ? session.avatarPath : settings.avatarRef;
 
   /// 打开「编辑资料」弹层：头像 / 用户名 / 生日。本机立即生效；登录后再同步到云端。
   ///
   /// 入口有两处：我的页的资料卡（跳到设置）、设置页的「编辑资料」行。
-  /// 游客哪儿都改不了 —— 入口拦一次，这里再兜一次。
+  /// 游客也能编辑，只是资料只落在本机、不推云端。
   static Future<void> showEditProfileSheet(
     BuildContext context, {
     required Repository repository,
     required Session session,
     required CloudService cloud,
   }) async {
-    if (!session.loggedIn) {
-      zToast(context, '游客模式不能修改资料，登录后即可编辑');
-      return;
-    }
     final settings = repository.settings;
     final draft = await showModalBottomSheet<_ProfileDraft>(
       context: context,

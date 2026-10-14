@@ -609,6 +609,51 @@ class ZButton extends StatelessWidget {
 }
 
 /// 列表行 —— 对应设计稿 .lrow
+/// 「标签 + 数值」的小统计块：一行排两三个，用 [border] 加左分隔线。
+/// 房源卡的关键数字、我的页租房账本、费用页「本月构成」都用它。
+class ZStat extends StatelessWidget {
+  const ZStat({
+    super.key,
+    required this.label,
+    required this.value,
+    this.border = false,
+    this.valueSize = 15,
+  });
+
+  final String label;
+  final String value;
+  final bool border;
+  final double valueSize;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        padding: EdgeInsets.only(left: border ? 11 : 0),
+        decoration: border
+            ? BoxDecoration(border: Border(left: BorderSide(color: Z.line2)))
+            : null,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: ZText.small.copyWith(fontSize: 11)),
+            const SizedBox(height: 3),
+            Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: ZText.label.copyWith(
+                fontSize: valueSize,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class ZListRow extends StatelessWidget {
   const ZListRow({
     super.key,

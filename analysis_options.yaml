@@ -41,6 +41,10 @@ linter:
     # 所以明暗切换的兜底不能靠「父级重建」，得整树标脏 —— 见 lib/app.dart 的
     # _AppearanceWatcher。有了它 const 不会再冻住颜色，但这几条规则会逼着
     # 全项目成百处 widget 加回 const，改动面太大，暂时继续关着。
+    # ⚠️ 另外：读令牌的地方**不能**写 const —— Z.ink4 这类是运行时 getter，
+    # 写进 const 表达式会直接编译失败（invalid_constant，Android 上表现为
+    # assembleDebug 报 "The invocation of 'ink4' is not allowed in a constant
+    # expression"）。IDE 的「加 const」快捷修复别往这些 widget 上点。
     # - prefer_const_constructors
     # - prefer_const_constructors_in_immutables
     # - prefer_const_literals_to_create_immutables
