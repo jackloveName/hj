@@ -1,0 +1,35 @@
+{
+    "name": "租盾 · 租房取证与押金守护",
+    "short_name": "租盾",
+    "start_url": ".",
+    "display": "standalone",
+    "background_color": "#F5F7FB",
+    "theme_color": "#2F6BFF",
+    "description": "从入住到退租，全程守护你的押金。租房取证、费用追踪、押金维权一体化工具。",
+    "orientation": "portrait-primary",
+    "prefer_related_applications": false,
+    "icons": [
+        {
+            "src": "icons/Icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/Icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/Icon-maskable-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "maskable"
+        },
+        {
+            "src": "icons/Icon-maskable-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        }
+    ]
+}

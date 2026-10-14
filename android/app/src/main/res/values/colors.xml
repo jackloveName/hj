@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 自适应图标背景：品牌蓝（前景盾牌在 mipmap-*/ic_launcher_foreground.png） -->
+    <color name="ic_launcher_background">#2F6BFF</color>
+</resources>

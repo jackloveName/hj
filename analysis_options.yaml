@@ -1,0 +1,56 @@
+# This file configures the analyzer, which statically analyzes Dart code to
+# check for errors, warnings, and lints.
+#
+# The issues identified by the analyzer are surfaced in the UI of Dart-enabled
+# IDEs (https://dart.dev/tools#ides-and-editors). The analyzer can also be
+# invoked from the command line by running `flutter analyze`.
+
+# The following line activates a set of recommended lints for Flutter apps,
+# packages, and plugins designed to encourage good coding practices.
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**
+
+linter:
+  # The lint rules applied to this project can be customized in the
+  # section below to disable rules from the `package:flutter_lints/flutter.yaml`
+  # included above or to enable additional rules. A list of all available lints
+  # and their documentation is published at https://dart.dev/lints.
+  #
+  # Instead of disabling a lint rule for the entire project in the
+  # section below, it can also be suppressed for a single line of code
+  # or a specific dart file by using the `// ignore: name_of_lint` and
+  # `// ignore_for_file: name_of_lint` syntax on the line or in the file
+  # producing the lint.
+  rules:
+    # 项目统一规则：上面 flutter_lints 已给一套推荐，这里补充几条偏工程质量的检查。
+    # 这些规则都能被 `dart fix --apply` 自动修，改动是机械的、不影响行为。
+    - always_declare_return_types
+    - avoid_unnecessary_containers
+    - directives_ordering
+    # 说明：设计令牌是全局静态值（Z.ink / Z.card ...），组件在 build 里读它们取色。
+    # const 出来的组件在父级重建时会被 Element 直接复用（不重跑 build），
+    # 所以明暗切换的兜底不能靠「父级重建」，得整树标脏 —— 见 lib/app.dart 的
+    # _AppearanceWatcher。有了它 const 不会再冻住颜色，但这几条规则会逼着
+    # 全项目成百处 widget 加回 const，改动面太大，暂时继续关着。
+    # - prefer_const_constructors
+    # - prefer_const_constructors_in_immutables
+    # - prefer_const_literals_to_create_immutables
+    - prefer_const_declarations
+    - prefer_final_fields
+    - sort_child_properties_last
+    - unawaited_futures
+    - unnecessary_brace_in_string_interps
+    - unnecessary_this
+    - use_super_parameters
+
+# Additional information about this file can be found at
+# https://dart.dev/guides/language/analysis-options

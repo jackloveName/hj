@@ -1,0 +1,77 @@
+name: zudun
+description: "租盾 — 从入住到退租，全程守护你的押金"
+publish_to: "none"
+version: 1.0.1+2
+
+environment:
+  sdk: ^3.13.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  # printing 的打印预览用到 CupertinoIcons，不能删
+  cupertino_icons: ^1.0.8
+  provider: ^6.1.2
+  path_provider: ^2.1.5
+  shared_preferences: ^2.3.3
+  image_picker: ^1.1.2
+  image: ^4.5.4
+  pdf: ^3.11.1
+  printing: ^5.13.4
+  archive: ^4.4.0
+  http: ^1.6.0
+  pointycastle: ^4.0.0
+  url_launcher: ^6.3.3
+  flutter_local_notifications: ^22.3.2
+  timezone: ^0.11.2
+  flutter_timezone: ^5.1.1
+  idb_shim: ^2.9.11
+  flutter_secure_storage: ^11.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+dependency_overrides:
+  # path_provider_android 2.3+ 会带进 jni 包，而 jni 的 Android CMake 配置在
+  # Windows + 含中文的 pub 缓存路径下会报 MalformedJsonException，导致打不出 APK。
+  # 上线阶段先锁在 2.2.x（功能一致，只是不走 jni 实现）。
+  path_provider_android: ">=2.2.0 <2.3.0"
+
+flutter:
+  uses-material-design: true
+  assets:
+    # 界面资源
+    - assets/fonts/
+    # PDF 导出用的全量中文字体（只给 rootBundle 按需读取，界面字体家族不引用它，
+    # 所以 Web 上只有真的导出 PDF 时才下载）
+    - assets/fonts/pdf/
+  fonts:
+    # 拉丁 / 数字：Outfit（设计稿正文字体）
+    - family: Outfit
+      fonts:
+        - asset: assets/fonts/Outfit-400.ttf
+          weight: 400
+        - asset: assets/fonts/Outfit-600.ttf
+          weight: 500
+        - asset: assets/fonts/Outfit-600.ttf
+          weight: 600
+        - asset: assets/fonts/Outfit-700.ttf
+          weight: 700
+    # 中文：Noto Sans SC（子集，含 GB2312 全量汉字）
+    - family: NotoSansSC
+      fonts:
+        - asset: assets/fonts/NotoSansSC-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/NotoSansSC-Bold.ttf
+          weight: 700
+    # 数字 / 日期：JetBrains Mono
+    - family: JetBrainsMono
+      fonts:
+        - asset: assets/fonts/JB-Mono-400.ttf
+          weight: 400
+        - asset: assets/fonts/JB-Mono-500.ttf
+          weight: 500

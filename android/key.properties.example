@@ -1,0 +1,7 @@
+# 复制成 key.properties（已在 .gitignore 里，不会进版本库）后再打正式包
+# 生成密钥：
+#   keytool -genkey -v -keystore zudun-release.jks -keyalg RSA -keysize 2048 -validity 36500 -alias zudun
+storeFile=../zudun-release.jks
+storePassword=你的密钥库口令
+keyAlias=zudun
+keyPassword=你的密钥口令
