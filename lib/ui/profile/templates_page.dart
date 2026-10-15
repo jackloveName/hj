@@ -241,10 +241,12 @@ class _TemplateFormPageState extends State<TemplateFormPage> {
         paragraphs: paragraphs,
       );
       if (!mounted) return;
-      await Printing.layoutPdf(
-        onLayout: (_) async => bytes,
-        name: '${widget.template.name}.pdf',
+      // 导出成文件（可存到文件 / 分享），不再进打印预览
+      await Printing.sharePdf(
+        bytes: bytes,
+        filename: '${widget.template.name}.pdf',
       );
+      if (mounted) zToast(context, '已导出：${widget.template.name}.pdf');
     } catch (error) {
       if (mounted) zToast(context, '导出失败：$error');
     } finally {

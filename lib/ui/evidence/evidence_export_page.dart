@@ -136,12 +136,14 @@ class _EvidenceExportPageState extends State<EvidenceExportPage> {
         sections: sections,
       );
       if (!mounted) return;
-      setState(() => _status = '已生成，正在打开预览…');
-      await Printing.layoutPdf(
-        onLayout: (_) async => bytes,
-        name: '${property.name}_取证清单.pdf',
+      setState(() => _status = '已生成，正在导出…');
+      // 导出成**文件**（iOS/安卓弹分享面板可存到文件；Web 直接下载），
+      // 不再打开打印预览
+      await Printing.sharePdf(
+        bytes: bytes,
+        filename: '${property.name}_取证清单.pdf',
       );
-      if (mounted) setState(() => _status = '取证清单已生成');
+      if (mounted) setState(() => _status = '取证清单已导出');
     } catch (error) {
       if (mounted) {
         setState(() => _status = '生成失败：$error');

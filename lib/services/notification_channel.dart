@@ -20,6 +20,10 @@ abstract class NotificationChannel {
   /// 请求授权（必须由用户操作触发）
   Future<NotificationPermission> requestPermission();
 
+  /// 查系统里**当前**的授权状态（不弹窗）。
+  /// 拿不到结论时返回 [NotificationPermission.unknown]，别把「查不到」当成「没授权」。
+  Future<NotificationPermission> checkPermission();
+
   Future<void> schedule(NotificationPlan plan);
 
   Future<void> show({
@@ -43,6 +47,10 @@ abstract class NotificationChannel {
 
   /// 发送后的复核：正常返回 null，否则返回原因（查不到就不下结论）
   Future<String?> verify(int id);
+
+  /// 系统里现在挂着几条**待触发**的排期；查不到返回 null。
+  /// iOS 上没授权时排期会被静默丢弃，靠它才能发现「页面说已开启、其实一条都没挂上」。
+  Future<int?> pendingCount();
 }
 
 /// 真机实现：flutter_local_notifications
@@ -63,8 +71,22 @@ class LocalNotificationChannel implements NotificationChannel {
   @override
   Future<bool> init({required void Function(String? payload) onTap}) async {
     tz_data.initializeTimeZones();
-    await _setupLocalTimeZone();
-    final initialized = await _plugin.initialize(
+    // 时区只是为了让「早上 9 点」这类时刻落在本机时间上；拿不到也不能因此
+    // 把整个通知功能判死，所以这里单独兜住
+    try {
+      await _setupLocalTimeZone();
+    } catch (error) {
+      debugPrint('设置本机时区失败，按系统默认时区排期：$error');
+    }
+    // 自检：苹果平台上连平台实现都解析不到，说明 Dart 侧的插件注册没跑到。
+    // 这时候 initialize 会抛得很含糊，不如直接说清楚该怎么办
+    if (!kIsWeb && !_darwinRegistered) {
+      throw StateError(
+        'iOS / macOS 原生插件没注册上（flutter_local_notifications）：'
+        '在 Mac 上执行 flutter clean && flutter pub get 后重新 flutter run',
+      );
+    }
+    Future<bool?> tryInit() => _plugin.initialize(
       settings: const InitializationSettings(
         // 通知栏小图标直接用 App 图标
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
@@ -73,11 +95,23 @@ class LocalNotificationChannel implements NotificationChannel {
           requestAlertPermission: false,
           requestBadgePermission: false,
           requestSoundPermission: false,
+          // 前台展示相关的默认值显式写出来：iOS 14+ 只认 banner / list，
+          // 这几个值会被落到 NSUserDefaults 里当默认值，留空就会变成「静默不弹」
+          defaultPresentAlert: true,
+          defaultPresentBanner: true,
+          defaultPresentList: true,
+          defaultPresentBadge: true,
+          defaultPresentSound: true,
         ),
         macOS: DarwinInitializationSettings(
           requestAlertPermission: false,
           requestBadgePermission: false,
           requestSoundPermission: false,
+          defaultPresentAlert: true,
+          defaultPresentBanner: true,
+          defaultPresentList: true,
+          defaultPresentBadge: true,
+          defaultPresentSound: true,
         ),
         linux: LinuxInitializationSettings(defaultActionName: '打开租盾'),
         windows: WindowsInitializationSettings(
@@ -88,8 +122,39 @@ class LocalNotificationChannel implements NotificationChannel {
       ),
       onDidReceiveNotificationResponse: (response) => onTap(response.payload),
     );
+
+    bool? initialized;
+    try {
+      initialized = await tryInit();
+    } catch (error) {
+      // 冷启动那一刻插件注册偶尔还没完成（iOS 上尤其容易），
+      // 隔一下再试一次；真没接上就让它抛，设置页会把原因显示出来
+      debugPrint('系统通知初始化失败，稍后重试：$error');
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      initialized = await tryInit();
+    }
     // Web 上返回 false 表示浏览器不支持；原生平台有的不返回值，按支持处理
     return initialized ?? !kIsWeb;
+  }
+
+  /// iOS / macOS 的平台实现能不能解析到（解析不到 = Dart 插件注册没执行）
+  bool get _darwinRegistered {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.iOS:
+        return _plugin
+                .resolvePlatformSpecificImplementation<
+                  IOSFlutterLocalNotificationsPlugin
+                >() !=
+            null;
+      case TargetPlatform.macOS:
+        return _plugin
+                .resolvePlatformSpecificImplementation<
+                  MacOSFlutterLocalNotificationsPlugin
+                >() !=
+            null;
+      default:
+        return true;
+    }
   }
 
   @override
@@ -149,6 +214,69 @@ class LocalNotificationChannel implements NotificationChannel {
     } catch (error) {
       debugPrint('请求通知权限失败：$error');
       return NotificationPermission.denied;
+    }
+  }
+
+  @override
+  Future<NotificationPermission> checkPermission() async {
+    if (kIsWeb) {
+      final web = _plugin
+          .resolvePlatformSpecificImplementation<
+            WebFlutterLocalNotificationsPlugin
+          >();
+      if (web == null) return NotificationPermission.unsupported;
+      return web.permissionStatus == WebNotificationPermission.granted
+          ? NotificationPermission.granted
+          : NotificationPermission.denied;
+    }
+    try {
+      switch (defaultTargetPlatform) {
+        case TargetPlatform.android:
+          final android = _plugin
+              .resolvePlatformSpecificImplementation<
+                AndroidFlutterLocalNotificationsPlugin
+              >();
+          if (android == null) return NotificationPermission.unsupported;
+          final on = await android.areNotificationsEnabled();
+          return on == false
+              ? NotificationPermission.denied
+              : NotificationPermission.granted;
+        case TargetPlatform.iOS:
+        case TargetPlatform.macOS:
+          final options = await _darwinOptions();
+          if (options == null) return NotificationPermission.unknown;
+          final on = options.isEnabled || options.isProvisionalEnabled;
+          return on
+              ? NotificationPermission.granted
+              : NotificationPermission.denied;
+        case TargetPlatform.linux:
+        case TargetPlatform.windows:
+        case TargetPlatform.fuchsia:
+          return NotificationPermission.granted;
+      }
+    } catch (error) {
+      debugPrint('查询通知授权状态失败：$error');
+      return NotificationPermission.unknown;
+    }
+  }
+
+  /// iOS / macOS 授权详情（含「提醒样式有没有被关」），查不到返回 null
+  Future<NotificationsEnabledOptions?> _darwinOptions() async {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.iOS:
+        return _plugin
+            .resolvePlatformSpecificImplementation<
+              IOSFlutterLocalNotificationsPlugin
+            >()
+            ?.checkPermissions();
+      case TargetPlatform.macOS:
+        return _plugin
+            .resolvePlatformSpecificImplementation<
+              MacOSFlutterLocalNotificationsPlugin
+            >()
+            ?.checkPermissions();
+      default:
+        return null;
     }
   }
 
@@ -244,8 +372,34 @@ class LocalNotificationChannel implements NotificationChannel {
           return '系统里把「租盾」的通知关掉了：去系统设置 → 应用 → 租盾 → 通知，打开它';
         }
         return null;
+      case TargetPlatform.iOS:
+      case TargetPlatform.macOS:
+        // 苹果这边「没授权」和「授权但把提醒样式关了」都会让通知悄无声息，
+        // 只有查一次系统设置才知道，所以这里必须真的查
+        final options = await _darwinOptions();
+        if (options == null) return null;
+        if (!options.isEnabled && !options.isProvisionalEnabled) {
+          return '系统里还没允许「租盾」发通知：点「授权系统通知」拉一次授权框，'
+              '或去 设置 → 通知 → 租盾 打开「允许通知」';
+        }
+        if (!options.isAlertEnabled) {
+          return '系统里把「租盾」的提醒样式关掉了：去 设置 → 通知 → 租盾 → 提醒，'
+              '改成「横幅」或「提醒」';
+        }
+        return null;
       default:
         return null;
+    }
+  }
+
+  @override
+  Future<int?> pendingCount() async {
+    if (kIsWeb) return null;
+    try {
+      final pending = await _plugin.pendingNotificationRequests();
+      return pending.length;
+    } catch (_) {
+      return null; // 平台查不到就不下结论
     }
   }
 
@@ -264,6 +418,18 @@ class LocalNotificationChannel implements NotificationChannel {
     }
   }
 
+  /// iOS 14+ 前台要不要弹，只看 banner / list 这两个开关。
+  /// 显式写死，不依赖初始化时落到 NSUserDefaults 的默认值
+  /// —— 那条链一旦取不到，通知就是「发出去了但看不见」。
+  static const DarwinNotificationDetails _darwinDetails =
+      DarwinNotificationDetails(
+        presentAlert: true,
+        presentBanner: true,
+        presentList: true,
+        presentSound: true,
+        presentBadge: true,
+      );
+
   NotificationDetails _details() => const NotificationDetails(
     android: AndroidNotificationDetails(
       _channelId,
@@ -272,8 +438,8 @@ class LocalNotificationChannel implements NotificationChannel {
       importance: Importance.high,
       priority: Priority.high,
     ),
-    iOS: DarwinNotificationDetails(),
-    macOS: DarwinNotificationDetails(),
+    iOS: _darwinDetails,
+    macOS: _darwinDetails,
     web: WebNotificationDetails(),
   );
 

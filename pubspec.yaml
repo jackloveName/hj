@@ -11,7 +11,7 @@ dependencies:
     sdk: flutter
   flutter_localizations:
     sdk: flutter
-  # printing 的打印预览用到 CupertinoIcons，不能删
+  # 现在已无人引用；Web 构建里它的字体被 tree-shake 到 ~1.5KB，先留着
   cupertino_icons: ^1.0.8
   provider: ^6.1.2
   path_provider: ^2.1.5

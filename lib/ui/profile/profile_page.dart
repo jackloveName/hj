@@ -92,6 +92,8 @@ class ProfilePage extends StatelessWidget {
     final settings = repository.settings;
     // 全部房源的租房账本：总租金 / 总租住天数（平均租金由这两个算出来）
     final summary = _allPropertiesSummary(repository);
+    // 流浪天数：真正在租的天数，按自然日去重（同时在租两套只算一天）
+    final wandering = repository.wanderingDays;
 
     return ZScreen(
       child: Column(
@@ -122,6 +124,7 @@ class ProfilePage extends StatelessWidget {
                       ),
                       const SizedBox(height: 6),
                       // 第三行：流浪天数（图标与首页那一行保持一致）
+                      // 天数按自然日去重，一套房子都没记 / 还没入住时是 0
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -132,7 +135,7 @@ class ProfilePage extends StatelessWidget {
                           ),
                           const SizedBox(width: 4),
                           Text(
-                            '你已流浪 ${session.daysSinceFirstSeen} 天',
+                            wandering > 0 ? '你已流浪 $wandering 天' : '还没开始记录租住',
                             style: ZText.small.copyWith(fontSize: 12),
                           ),
                         ],

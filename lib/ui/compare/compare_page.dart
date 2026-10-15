@@ -435,10 +435,12 @@ class _ComparePageState extends State<ComparePage> {
         conclusion: _conclusion.text.trim(),
       );
       if (!mounted) return;
-      await Printing.layoutPdf(
-        onLayout: (_) async => bytes,
-        name: '${property.name}_退租对比报告.pdf',
+      // 导出成文件：分享面板里可以「存储到文件」/ 发给房东，不再进打印预览
+      await Printing.sharePdf(
+        bytes: bytes,
+        filename: '${property.name}_退租对比报告.pdf',
       );
+      if (context.mounted) zToast(context, '对比报告已导出');
     } catch (error) {
       if (context.mounted) zToast(context, '生成失败：$error');
     } finally {

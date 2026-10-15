@@ -22,7 +22,6 @@ class Session extends ChangeNotifier {
   static const String _userKey = 'zudun.user_info';
   static const String _authKey = 'zudun.auth';
   static const String _guestKey = 'zudun.guest_mode';
-  static const String _firstSeenKey = 'zudun.first_seen_at';
   final LocalStore _store;
 
   /// 访问凭证单独走一条通道：移动端进 Keychain / Keystore
@@ -32,7 +31,6 @@ class Session extends ChangeNotifier {
   String _phone = '';
   String _provider = '';
   Map<String, dynamic> _user = <String, dynamic>{};
-  DateTime? _firstSeenAt;
 
   String get token => _token;
   String get phone => _phone;
@@ -41,28 +39,11 @@ class Session extends ChangeNotifier {
 
   bool get loggedIn => _token.isNotEmpty;
 
-  /// 用户首次打开 app / 登录的时间：未记录过则返回 null
-  DateTime? get firstSeenAt => _firstSeenAt;
-
-  /// 从首次使用到今天的「流浪天数」：未记录返回 0
-  int get daysSinceFirstSeen {
-    final start = _firstSeenAt;
-    if (start == null) return 0;
-    final today = DateTime.now();
-    final days = DateTime(
-      today.year,
-      today.month,
-      today.day,
-    ).difference(DateTime(start.year, start.month, start.day)).inDays;
-    return days < 0 ? 0 : days;
-  }
-
-  /// 是否已选择「本机模式」：首屏据此决定要不要先显示登录页
+  /// 是否已选择「游客模式」：首屏据此决定要不要先显示登录页
   bool get guestMode => _store.getString(_guestKey) == 'true';
 
-  /// 进入本机（游客）模式：同样记录首次使用时间，用于「流浪」文案
+  /// 进入游客模式：数据只留在本机内存里，不落盘
   Future<void> enterGuestMode() async {
-    await ensureFirstSeen();
     await _store.setString(_guestKey, 'true');
     notifyListeners();
   }
@@ -116,23 +97,6 @@ class Session extends ChangeNotifier {
         _phone = '';
       }
     }
-    final rawFirstSeen = _store.getString(_firstSeenKey);
-    if (rawFirstSeen != null && rawFirstSeen.isNotEmpty) {
-      _firstSeenAt = DateTime.tryParse(rawFirstSeen);
-    }
-  }
-
-  /// 首次进入时记录起点：已存在则不覆盖。
-  /// 由 [CloudService.restore] 在启动时无条件调用，确保新用户首启即落地。
-  Future<void> ensureFirstSeen() async {
-    if (_firstSeenAt != null) return;
-    final existing = _store.getString(_firstSeenKey);
-    if (existing != null && existing.isNotEmpty) {
-      _firstSeenAt = DateTime.tryParse(existing);
-      if (_firstSeenAt != null) return;
-    }
-    _firstSeenAt = DateTime.now();
-    await _store.setString(_firstSeenKey, _firstSeenAt!.toIso8601String());
   }
 
   /// 登录成功：保存凭证与账号信息
@@ -146,8 +110,7 @@ class Session extends ChangeNotifier {
     _phone = phone;
     _provider = provider;
     _user = Map<String, dynamic>.from(user);
-    await ensureFirstSeen();
-    // 登录后即退出本机模式标记，后续使用账号作用域
+    // 登录后即退出游客模式标记，后续使用账号作用域
     await _store.remove(_guestKey);
     await _tokenStore.write(_token);
     await _store.setString(
