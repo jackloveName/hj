@@ -36,6 +36,8 @@ class HomePage extends StatelessWidget {
     }
 
     final reminders = repository.reminders;
+    // 一次算好，别在标题和列表里各算一遍（里面要过滤+排序全部照片）
+    final recent = _recentPhotos(repository, property.id);
 
     return SafeArea(
       bottom: false,
@@ -71,7 +73,7 @@ class HomePage extends StatelessWidget {
                     ZSectionTitle(
                       title: '最近取证',
                       icon: Icons.photo_camera_back_outlined,
-                      moreLabel: _recentPhotos(repository, property.id).isEmpty
+                      moreLabel: recent.isEmpty
                           ? null
                           : '共 ${repository.photoCountOf(property.id)} 张',
                       onMore: () => zPush(
@@ -81,7 +83,7 @@ class HomePage extends StatelessWidget {
                     ),
                     _RecentPhotos(
                       propertyId: property.id,
-                      photos: _recentPhotos(repository, property.id),
+                      photos: recent,
                     ),
                     const ZSectionTitle(
                       title: '本月概览',
@@ -99,12 +101,9 @@ class HomePage extends StatelessWidget {
     );
   }
 
-  /// 最近拍的照片（按时间倒序，最多取 6 张给首页展示）
-  List<EvidencePhoto> _recentPhotos(Repository repository, String propertyId) {
-    final photos = repository.photosOf(propertyId)
-      ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
-    return photos.take(6).toList();
-  }
+  /// 最近拍的照片（`photosOf` 已经是按时间倒序，这里只取前 6 张）
+  List<EvidencePhoto> _recentPhotos(Repository repository, String propertyId) =>
+      repository.photosOf(propertyId).take(6).toList();
 
 }
 

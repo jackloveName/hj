@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../data/repository.dart';
 import '../services/protocol_service.dart';
@@ -14,6 +16,33 @@ import 'legal_sheets.dart';
 /// 本机记下「已同意的协议版本」的键。
 /// 版本号见 [zudunProtocolVersion]：协议有实质更新时 +1，下次启动会重新征询。
 const String kPrivacyConsentKey = 'zudun.privacy.agreedVersion';
+
+/// iOS 上协议链接直接打开的**网页版**地址（App 内浏览器，不跳出 App）。
+/// 网页按 `dy` 参数替换运营方与邮箱，这里传 `dy=ios` → Rinze Loop。
+const String kIosPrivacyUrl =
+    'https://dmjz-h5.makcabxa02y.icu/dm_agreement.html'
+    '?type=ZD_PRIVACY_PROTOC&dy=ios';
+const String kIosAgreementUrl =
+    'https://dmjz-h5.makcabxa02y.icu/dm_agreement.html'
+    '?type=ZD_REGISTER_PROTOC&dy=ios';
+
+/// 点协议链接：iOS 走上面的网页；其它平台仍用 App 内的协议弹层
+/// （正文来自服务端 `ZD_*` 配置）。网页打不开时自动退回弹层，不让按钮点了没反应。
+Future<void> openProtocol(BuildContext context, ProtocolKind kind) async {
+  if (!kIsWeb && Platform.isIOS) {
+    final url = Uri.parse(
+      kind == ProtocolKind.privacy ? kIosPrivacyUrl : kIosAgreementUrl,
+    );
+    try {
+      final launched = await launchUrl(url, mode: LaunchMode.inAppBrowserView);
+      if (launched) return;
+    } catch (_) {
+      // 落到下面的兜底
+    }
+  }
+  if (!context.mounted) return;
+  await showProtocolSheet(context, kind);
+}
 
 /// 首次启动（或协议版本更新后）先征询同意。
 ///
@@ -28,7 +57,15 @@ Future<void> ensurePrivacyConsent(BuildContext context) async {
 
   final agreed = await _showConsentDialog(context);
   if (!agreed) return;
-  await store.setString(kPrivacyConsentKey, zudunProtocolVersion);
+  // 同意状态先写进内存（getString 立刻读得到），落盘放后台：
+  // 别让「同意」这一步卡在磁盘写入上（写失败也只是下次启动再问一遍）
+  unawaited(() async {
+    try {
+      await store.setString(kPrivacyConsentKey, zudunProtocolVersion);
+    } catch (_) {
+      // 落盘失败：本次仍按已同意放行，下次启动重新征询
+    }
+  }());
 }
 
 /// 弹「服务协议和隐私政策」；返回是否最终同意
@@ -62,6 +99,61 @@ void _quitApp(BuildContext context) {
   zToast(context, '同意后才能继续使用，下次打开会再问你一次');
 }
 
+/// 还没同意协议时挡在 App 前面的一屏。
+///
+/// 安卓上「不同意」会直接退出；Web / iOS 不允许程序自己退出，
+/// 就停在这里 —— 不能让人不表态就把 App 用起来。
+class PrivacyGateScreen extends StatelessWidget {
+  const PrivacyGateScreen({super.key, required this.onAgree});
+
+  final VoidCallback onAgree;
+
+  @override
+  Widget build(BuildContext context) {
+    final body = ZText.body.copyWith(fontSize: 13, height: 1.8);
+    return ZScreen(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.privacy_tip_outlined, size: 34, color: Z.brand),
+              const SizedBox(height: 14),
+              Text('请先阅读并同意协议', style: ZText.title3),
+              const SizedBox(height: 10),
+              Wrap(
+                alignment: WrapAlignment.center,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Text('继续使用前，需要你同意', style: body),
+                  _protocolLink(
+                    context,
+                    '《隐私政策》',
+                    ProtocolKind.privacy,
+                    body,
+                  ),
+                  Text('和', style: body),
+                  _protocolLink(
+                    context,
+                    '《平台注册协议》',
+                    ProtocolKind.agreement,
+                    body,
+                  ),
+                  Text('。', style: body),
+                ],
+              ),
+              const SizedBox(height: 20),
+              // 用词和弹窗里的「同意并继续」区分开，免得两处同名
+              ZButton(label: '我同意', onTap: onAgree),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// 可点击的《隐私政策》/《平台注册协议》
 Widget _protocolLink(
   BuildContext context,
@@ -69,7 +161,7 @@ Widget _protocolLink(
   ProtocolKind kind,
   TextStyle style,
 ) => InkWell(
-  onTap: () => showProtocolSheet(context, kind),
+  onTap: () => openProtocol(context, kind),
   child: Text(label, style: style.copyWith(color: Z.brand)),
 );
 

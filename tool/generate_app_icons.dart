@@ -52,7 +52,13 @@ void main() {
     'Icon-App-1024x1024@1x.png': 1024,
   };
   iosIcons.forEach((name, size) {
-    _write('ios/Runner/Assets.xcassets/AppIcon.appiconset/$name', _icon(size));
+    // iOS 上架硬要求：App 图标**不能带 alpha 通道**（否则上传报
+    // "Invalid Image … can't have an alpha channel"），所以转成 3 通道再写。
+    // 图标底本来就是全不透明的渐变，去 alpha 不会改变外观。
+    _write(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/$name',
+      _icon(size).convert(numChannels: 3),
+    );
   });
 
   // Web：PWA 图标（maskable 要留安全边距）+ favicon
