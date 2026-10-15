@@ -5237,9 +5237,13 @@ void groupWidgets() {
     expect(find.text('确认提示'), findsOneWidget);
     expect(find.text('退出应用'), findsOneWidget);
 
+    // 这期间 App 是被挡住的：不能让人不表态就继续用
+    expect(find.text('请先阅读并同意协议'), findsOneWidget);
+
     await tester.tap(find.text('同意并继续'));
     await tester.pumpAndSettle();
     expect(find.text('确认提示'), findsNothing);
+    expect(find.text('请先阅读并同意协议'), findsNothing, reason: '同意后放行');
     expect(repository.store.getString(kPrivacyConsentKey), zudunProtocolVersion);
   });
 

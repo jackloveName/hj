@@ -9,6 +9,7 @@ import 'models/models.dart';
 import 'services/api/api_settings.dart';
 import 'services/cloud_service.dart';
 import 'services/notification_service.dart';
+import 'services/protocol_service.dart';
 import 'services/session.dart';
 import 'theme/app_theme.dart';
 import 'theme/tokens.dart';
@@ -201,15 +202,35 @@ class _StartupGate extends StatefulWidget {
 class _StartupGateState extends State<_StartupGate> {
   bool _updateChecked = false;
 
+  /// 还没同意协议：整屏挡住，只有同意才进得去
+  bool _consentMissing = false;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       // 首次启动（或协议版本更新后）先征询同意：对齐应用市场合规要求
-      await ensurePrivacyConsent(context);
+      await _askConsent();
       if (!mounted) return;
       await _checkUpdate();
     });
+  }
+
+  /// 征询协议同意；没同意就一直挡着（安卓上用户可以直接选退出 App）
+  Future<void> _askConsent() async {
+    final store = context.read<Repository>().store;
+    bool agreed() =>
+        store.getString(kPrivacyConsentKey) == zudunProtocolVersion;
+
+    if (agreed()) {
+      if (_consentMissing) setState(() => _consentMissing = false);
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _consentMissing = true);
+    await ensurePrivacyConsent(context);
+    if (!mounted) return;
+    if (agreed()) setState(() => _consentMissing = false);
   }
 
   /// 启动时静默检查版本更新：请求失败、没有新版都安静放过
@@ -233,6 +254,8 @@ class _StartupGateState extends State<_StartupGate> {
 
   @override
   Widget build(BuildContext context) {
+    // 协议没同意之前，App 一直停在「请先同意」这一屏
+    if (_consentMissing) return PrivacyGateScreen(onAgree: _askConsent);
     final session = context.watch<Session>();
     // 进来就是登录页：两份协议由用户自己想看的时候点开（登录页底部有入口）
     return session.loggedIn || session.guestMode

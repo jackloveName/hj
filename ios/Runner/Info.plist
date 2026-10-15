@@ -30,6 +30,13 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<!-- 出口合规（加密）：本 App 的加密只用于「传输安全 + 登录身份认证」——
+	     接口走标准 HTTPS，登录密码在本机用标准算法（AES-ECB + PKCS7，
+	     pointycastle 实现）加密后再发送，不用于任何其它目的。
+	     按「仅用于认证的标准加密」当豁免处理，提交时不再逐次回答加密问题。
+	     若将来引入其它加密用途（例如加密本地数据库），这一条要重新评估。 -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<!-- 上架必须有用途说明，否则调用相机 / 相册会直接崩，审核也会被拒 -->

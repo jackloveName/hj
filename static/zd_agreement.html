@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>租盾 · 隐私政策</title>
+<!--
+  租盾协议页（静态单文件，无需构建）
+
+  用法：把本文件放到网关/站点的根目录，然后访问
+    https://<你的域名>/zd_agreement.html?type=ZD_PRIVACY_PROTOC&dy=ios
+    https://<你的域名>/zd_agreement.html?type=ZD_REGISTER_PROTOC&dy=ios
+
+  说明：
+  - 正文来自与 App **完全相同的**配置接口（同域相对路径，无跨域问题）：
+      ./mall_admin/ua/app/sys_config/get/value/config/<type>
+  - ${name} / ${email} 按 dy 平台替换，规则与 dmjz 的 terms/index.vue 一致：
+      dy=ios → Rinze Loop / rinzeloop@icloud.com
+      其它    → 湖北黩歆科技有限公司 / developking6@outlook.com
+  - 正文是 HTML 就直接渲染（顺手去掉 script 标签），是纯文本就按行包 <p>。
+-->
+<style>
+  :root {
+    --page: #f5f7fb;
+    --card: #ffffff;
+    --ink: #0e1f3d;
+    --ink2: #33456b;
+    --ink3: #6b7a99;
+    --line: #e4e8f0;
+    --brand: #2f6bff;
+    --brand-deep: #1740b8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #101725;
+      --card: #1a2231;
+      --ink: #e8edf7;
+      --ink2: #c4cee1;
+      --ink3: #94a2bb;
+      --line: #2b3546;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    min-height: 100%;
+    background: var(--page);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+      "PingFang SC", "Microsoft YaHei", sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  .wrap {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: calc(20px + env(safe-area-inset-top)) 16px
+      calc(40px + env(safe-area-inset-bottom));
+  }
+  .hero {
+    padding: 18px 20px;
+    border-radius: 18px;
+    background: linear-gradient(135deg, #0f2a5e, #17427f);
+    color: #fff;
+    box-shadow: 0 12px 30px -14px rgba(14, 31, 61, 0.5);
+  }
+  .hero h1 { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -0.3px; }
+  .hero p { margin: 6px 0 0; font-size: 12px; color: rgba(255, 255, 255, 0.78); }
+  .card {
+    margin-top: 14px;
+    padding: 20px 18px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--card);
+    box-shadow: 0 10px 26px -18px rgba(14, 31, 61, 0.35);
+    font-size: 14.5px;
+    line-height: 1.9;
+    color: var(--ink2);
+    word-break: break-word;
+  }
+  .card p { margin: 0 0 14px; }
+  .card h1, .card h2, .card h3 { color: var(--ink); font-size: 16px; margin: 20px 0 10px; }
+  .card strong, .card b { color: var(--ink); }
+  .card a { color: var(--brand); }
+  .muted { color: var(--ink3); font-size: 13px; }
+  .btn {
+    margin-top: 6px;
+    padding: 9px 18px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--brand);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .foot {
+    margin-top: 14px;
+    text-align: center;
+    font-size: 11.5px;
+    line-height: 1.8;
+    color: var(--ink3);
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero">
+      <h1 id="title">隐私政策</h1>
+      <p>租盾 · 从入住到退租，全程守护你的押金</p>
+    </div>
+    <div class="card" id="content">
+      <p class="muted">正在加载协议内容…</p>
+    </div>
+    <p class="foot" id="foot"></p>
+  </div>
+
+<script>
+  // 协议键 → 中文标题（与 App 里用的键完全一致）
+  var PROTOCOLS = {
+    ZD_PRIVACY_PROTOC: '隐私政策',
+    ZD_REGISTER_PROTOC: '平台注册协议'
+  };
+  // 按平台替换的运营方与联系邮箱（规则同 dmjz 的 terms/index.vue）
+  var CONTACTS = {
+    ios: { name: 'Rinze Loop', email: 'rinzeloop@icloud.com' },
+    ad: { name: '湖北黩歆科技有限公司', email: 'developking6@outlook.com' }
+  };
+
+  var params = new URLSearchParams(window.location.search);
+  var type = params.get('type') || 'ZD_PRIVACY_PROTOC';
+  var dy = (params.get('dy') || 'ios').toLowerCase();
+  var contact = CONTACTS[dy] || CONTACTS.ios;
+  var title = PROTOCOLS[type] || '协议';
+
+  document.title = '租盾 · ' + title;
+  document.getElementById('title').textContent = title;
+  document.getElementById('foot').textContent =
+    '运营方：' + contact.name + ' · 联系邮箱：' + contact.email;
+
+  // 服务端可能返回字符串，也可能包一层 paramValue / value / content / text
+  function getConfigText(value) {
+    if (value === null || value === undefined || value === '') return '';
+    if (typeof value === 'string') return value;
+    if (typeof value !== 'object') return String(value);
+    if (value.paramValue !== undefined) return getConfigText(value.paramValue);
+    if (value.value !== undefined) return getConfigText(value.value);
+    if (value.content !== undefined) return getConfigText(value.content);
+    if (value.text !== undefined) return getConfigText(value.text);
+    return '';
+  }
+
+  function replacePlaceholders(content) {
+    return String(content)
+      .replace(/\$\{name\}/g, contact.name)
+      .replace(/\$\{email\}/g, contact.email);
+  }
+
+  function escapeHtml(content) {
+    return String(content)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function formatContent(content) {
+    var text = replacePlaceholders(content).trim();
+    if (!text) return '';
+    // 正文本来就是 HTML：直接用，但去掉脚本，避免正文里混进可执行内容
+    if (/<[a-z][\s\S]*>/i.test(text)) {
+      return text.replace(/<script[\s\S]*?<\/script>/gi, '');
+    }
+    return text
+      .split(/\r?\n/)
+      .map(function (line) { return '<p>' + escapeHtml(line || ' ') + '</p>'; })
+      .join('');
+  }
+
+  async function load() {
+    var box = document.getElementById('content');
+    box.innerHTML = '<p class="muted">正在加载协议内容…</p>';
+    try {
+      // 与网关同域：用相对路径，不用配 CORS
+      var url = './mall_admin/ua/app/sys_config/get/value/config/' +
+        encodeURIComponent(type);
+      var res = await fetch(url, { headers: { Accept: 'application/json' } });
+      var json = await res.json();
+      var html = formatContent(getConfigText(json && json.data));
+      if (!html) throw new Error('empty');
+      box.innerHTML = html;
+    } catch (error) {
+      box.innerHTML =
+        '<p class="muted">协议内容暂时加载失败，请稍后重试。</p>' +
+        '<button class="btn" id="retry">重试</button>';
+      var retry = document.getElementById('retry');
+      if (retry) retry.onclick = load;
+    }
+  }
+
+  load();
+</script>
+</body>
+</html>
