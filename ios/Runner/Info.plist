@@ -14,7 +14,6 @@
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
-	<!-- App 本身只有中文，声明出来系统才知道按简体中文对待（系统弹窗 / 商店信息跟着走） -->
 	<key>CFBundleLocalizations</key>
 	<array>
 		<string>zh-Hans</string>
@@ -32,7 +31,6 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<!-- 上架必须有用途说明，否则调用相机 / 相册会直接崩，审核也会被拒 -->
 	<key>NSCameraUsageDescription</key>
 	<string>用于拍摄房屋现状，作为入住与退租的取证材料</string>
 	<key>NSPhotoLibraryUsageDescription</key>
