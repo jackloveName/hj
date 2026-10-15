@@ -475,6 +475,44 @@ double sumUtilityCost(List<UtilityRecord> utilities, String propertyId) =>
         .where((u) => u.propertyId == propertyId)
         .fold(0.0, (sum, u) => sum + u.totalCost);
 
+/// 「流浪天数」：所有房源真正在租的天数，**按自然日去重**。
+///
+/// 同时在租两套房的那些天只算一天；换租、租期有重叠也一样只算一次。
+/// 在租的房子算到今天，已退租 / 纠纷的算到合同到期日（更接近「租住结束」）；
+/// 入住当天也算一天，还没到入住日（入住日在未来）的不计入。
+int countWanderingDays(List<Property> properties, {DateTime? now}) {
+  final today = dateOnly(now ?? DateTime.now());
+  final intervals = <({DateTime start, DateTime end})>[];
+  for (final property in properties) {
+    final start = dateOnly(property.contract.moveInDate);
+    final end = dateOnly(
+      property.status == PropertyStatus.active
+          ? today
+          : property.contract.contractEnd,
+    );
+    if (daysBetween(start, end) < 0) continue;
+    intervals.add((start: start, end: end));
+  }
+  if (intervals.isEmpty) return 0;
+  intervals.sort((a, b) => a.start.compareTo(b.start));
+
+  // 把重叠 / 紧邻的租期合并成几段，再按「含首尾」数天数：
+  // 8/1 入住、8/31 搬走是 31 天，而不是 30 天
+  var days = 0;
+  var start = intervals.first.start;
+  var end = intervals.first.end;
+  for (final range in intervals.skip(1)) {
+    if (daysBetween(end, range.start) <= 1) {
+      if (range.end.isAfter(end)) end = range.end;
+      continue;
+    }
+    days += daysBetween(start, end) + 1;
+    start = range.start;
+    end = range.end;
+  }
+  return days + daysBetween(start, end) + 1;
+}
+
 /// 某年的抄表合计：金额、三种表的用量、固定费用
 class UtilityYearSummary {
   const UtilityYearSummary({

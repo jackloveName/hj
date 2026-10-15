@@ -73,6 +73,11 @@ class NotificationService extends ChangeNotifier {
   List<NotificationPlan> get plans => _plans;
   String? get lastError => _lastError;
 
+  /// 系统里现在挂着几条待触发的排期；查不到是 null。
+  /// 「页面上说已开启，实际一条都没排上」这种情况靠它露出来。
+  int? get queuedCount => _queuedCount;
+  int? _queuedCount;
+
   /// 初始化（幂等）
   Future<bool> ensureReady() async {
     if (_ready) return _available;
@@ -97,6 +102,32 @@ class NotificationService extends ChangeNotifier {
     } catch (error) {
       _lastError = '$error';
       return _setPermission(NotificationPermission.denied);
+    }
+  }
+
+  /// 查系统里当前的授权状态（不弹窗）。
+  /// 每次进设置页、每次排期前都核对一次：开关是历史设置，授权却可能被系统收回去。
+  Future<NotificationPermission> refreshPermission() async {
+    if (!await ensureReady()) return NotificationPermission.unsupported;
+    try {
+      final value = await _channel.checkPermission();
+      // 查不到就维持原判，别把 unknown 当成「被拒了」
+      if (value == NotificationPermission.unknown) return _permission;
+      return _setPermission(value);
+    } catch (error) {
+      _lastError = '$error';
+      notifyListeners();
+      return _permission;
+    }
+  }
+
+  /// 系统里挂着几条待触发排期（null 表示平台查不到）
+  Future<int?> pendingCount() async {
+    if (!await ensureReady()) return null;
+    try {
+      return await _channel.pendingCount();
+    } catch (_) {
+      return null;
     }
   }
 
@@ -174,6 +205,7 @@ class NotificationService extends ChangeNotifier {
     if (!_enabled) {
       await _cancelAll();
       _stopInAppTimer();
+      _queuedCount = 0;
       notifyListeners();
       return;
     }
@@ -185,10 +217,16 @@ class NotificationService extends ChangeNotifier {
 
     if (!_channel.supportsScheduling) {
       // 浏览器排不了期，只能页面开着时到点弹
+      _queuedCount = null;
       _armInAppTimer();
       notifyListeners();
       return;
     }
+
+    // 排期前先核对系统授权：苹果这边没授权时排期会被静默丢弃，
+    // 不核对就会出现「页面说已开启、实际一条都不会响」
+    await refreshPermission();
+    _syncBlockedHint();
 
     // 原生端：清掉上一轮的「待触发」排期再排一遍。
     // 这里不能用 cancelAll —— 那会把已经弹出、用户还没看的提醒一起撤掉。
@@ -196,7 +234,47 @@ class NotificationService extends ChangeNotifier {
     for (final plan in _plans) {
       await _schedule(plan);
     }
+    await _verifyQueued();
     notifyListeners();
+  }
+
+  /// 授权没通过时，把「为什么不会响」记成一句人话，让设置页能直接摆出来
+  void _syncBlockedHint() {
+    if (_permission == NotificationPermission.denied) {
+      final hint = isWeb
+          ? '浏览器还没允许通知：先点上面的开关授权，或到站点设置里把「通知」改成允许'
+          : '系统还没允许「租盾」发通知：点下面的「授权系统通知」，'
+                '或到系统设置里打开通知后回来重开一次开关';
+      if (_lastError != hint) _lastError = hint;
+      return;
+    }
+    if (_lastError?.startsWith('系统还没允许') == true ||
+        _lastError?.startsWith('浏览器还没允许') == true) {
+      _lastError = null;
+    }
+  }
+
+  /// 排完期回查一次：系统一条都没接，说明这次排期白排了
+  Future<void> _verifyQueued() async {
+    if (_plans.isEmpty) {
+      _queuedCount = 0;
+      return;
+    }
+    int? pending;
+    try {
+      pending = await _channel.pendingCount();
+    } catch (error) {
+      _lastError = '$error';
+      return;
+    }
+    _queuedCount = pending;
+    if (pending == null) return; // 查不到就不下结论
+    if (pending == 0) {
+      _lastError = '系统没有接下这次排期：检查「设置 → 通知 → 租盾」是否允许通知，'
+          '再回来重开一次开关';
+    } else if (_lastError?.startsWith('系统没有接下') == true) {
+      _lastError = null;
+    }
   }
 
   void _onRepositoryChanged() {

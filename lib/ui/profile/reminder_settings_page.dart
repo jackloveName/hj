@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/repository.dart';
@@ -9,8 +12,26 @@ import '../../utils/format.dart';
 import '../kit.dart';
 
 /// 页面 22 · 提醒设置
-class ReminderSettingsPage extends StatelessWidget {
+class ReminderSettingsPage extends StatefulWidget {
   const ReminderSettingsPage({super.key});
+
+  @override
+  State<ReminderSettingsPage> createState() => _ReminderSettingsPageState();
+}
+
+class _ReminderSettingsPageState extends State<ReminderSettingsPage> {
+  @override
+  void initState() {
+    super.initState();
+    // 进页面就核对一次系统授权并重排：开关是历史设置，
+    // 授权可能被系统收回（iOS 上没授权时排期会被静默丢弃）
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final notifications = context.read<NotificationService>();
+      unawaited(notifications.refreshPermission());
+      if (notifications.enabled) unawaited(notifications.sync());
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -64,6 +85,22 @@ class ReminderSettingsPage extends StatelessWidget {
                           style: ZText.small,
                         ),
                       ),
+                      // 不支持时给一个「复制原因」：真机上出问题直接复制发出来，
+                      // 比让人照着屏幕念错误信息靠谱
+                      if (!notifications.available &&
+                          notifications.lastError != null)
+                        TextButton.icon(
+                          onPressed: () async {
+                            await Clipboard.setData(
+                              ClipboardData(
+                                text: notifications.lastError ?? '',
+                              ),
+                            );
+                            if (context.mounted) zToast(context, '原因已复制');
+                          },
+                          icon: const Icon(Icons.copy_rounded, size: 18),
+                          label: const Text('复制原因'),
+                        ),
                       if (settings.systemNotifications) ...[
                         Divider(height: 18, color: Z.line2),
                         for (final plan in notifications.plans.take(3))
@@ -112,6 +149,32 @@ class ReminderSettingsPage extends StatelessWidget {
                           ),
                           label: const Text('发一条测试通知'),
                         ),
+                        // 开关是历史设置，系统授权却可能从没给过或被收回
+                        // （iOS 上没授权时排期会被静默丢弃）——这里把「重新授权」
+                        // 摆出来，授权成功立刻重排一次
+                        if (notifications.permission !=
+                            NotificationPermission.granted)
+                          TextButton.icon(
+                            onPressed: () async {
+                              final permission = await notifications
+                                  .requestPermission();
+                              if (!context.mounted) return;
+                              if (permission !=
+                                  NotificationPermission.granted) {
+                                zToast(context, '还没拿到授权，请到系统设置里打开通知');
+                                return;
+                              }
+                              await notifications.sync();
+                              if (context.mounted) {
+                                zToast(context, '已授权，提醒重新排好了');
+                              }
+                            },
+                            icon: const Icon(
+                              Icons.notifications_active_outlined,
+                              size: 18,
+                            ),
+                            label: const Text('授权系统通知'),
+                          ),
                         // 系统没授权时给一个直达入口，不用自己去翻设置
                         if (notifications.permission ==
                             NotificationPermission.denied)
@@ -119,6 +182,20 @@ class ReminderSettingsPage extends StatelessWidget {
                             onPressed: notifications.openSystemSettings,
                             icon: const Icon(Icons.settings_outlined, size: 18),
                             label: const Text('去系统设置打开通知'),
+                          ),
+                        // 排期失败 / 系统没接下这次排期，直接把原因摆出来，
+                        // 别让「点了没反应」变成一个查不出来的谜
+                        if (notifications.lastError != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(
+                              notifications.lastError!,
+                              style: ZText.small.copyWith(
+                                fontSize: 11.5,
+                                height: 1.5,
+                                color: Z.danger,
+                              ),
+                            ),
                           ),
                       ],
                     ],
@@ -317,7 +394,11 @@ class ReminderSettingsPage extends StatelessWidget {
         zToast(context, '系统还没允许通知，请在系统设置里打开后重试');
         return;
       case NotificationPermission.unsupported:
-        zToast(context, '当前环境不支持系统通知，仅保留应用内提醒');
+        zToast(
+          context,
+          '当前环境不支持系统通知，仅保留应用内提醒'
+          '${notifications.lastError == null ? '' : '（原因：${notifications.lastError}）'}',
+        );
         return;
       case NotificationPermission.granted:
       case NotificationPermission.unknown:
@@ -332,9 +413,13 @@ class ReminderSettingsPage extends StatelessWidget {
   /// 开关下面那行状态说明
   String _systemStatusText(NotificationService notifications) {
     if (!notifications.available) {
-      return notifications.isWeb
+      final base = notifications.isWeb
           ? '当前浏览器不支持系统通知，提醒只显示在应用内'
           : '当前平台暂不支持系统通知，提醒只显示在应用内';
+      // 把底层原因摆出来：光说「不支持」没法查，真机上就没法判断是插件没接上
+      // 还是系统没授权
+      final reason = notifications.lastError;
+      return reason == null ? base : '$base（原因：$reason）';
     }
     if (!notifications.enabled) {
       return notifications.supportsScheduling
@@ -342,10 +427,16 @@ class ReminderSettingsPage extends StatelessWidget {
           : '开启后，页面开着时到点弹通知（浏览器不支持关掉页面后提醒）';
     }
     if (notifications.permission == NotificationPermission.denied) {
-      return '系统未授权：请到系统设置里允许租盾发送通知';
+      return '系统未授权：点下面的「授权系统通知」，或到系统设置里允许租盾发送通知';
     }
     final count = notifications.plans.length;
     if (count == 0) return '已开启，当前没有需要提醒的事项';
+    // 系统里真挂上了几条，比「计划了几条」更能说明问题
+    final queued = notifications.queuedCount;
+    if (queued != null && queued > 0) {
+      return '已开启，系统里已排好 $queued 条提醒';
+    }
+    if (queued == 0) return '已开启，但系统一条排期都没接下：看下面的原因';
     return '已开启，接下来有 $count 条提醒';
   }
 }

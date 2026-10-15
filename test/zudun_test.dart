@@ -68,11 +68,18 @@ import 'package:zudun/utils/format.dart';
 
 /// 假通知通道：把调用记下来，用来验证「排期 / 清空」逻辑而不依赖真机
 class _FakeNotificationChannel implements NotificationChannel {
-  _FakeNotificationChannel({this.supported = true, this.granted = true});
+  _FakeNotificationChannel({
+    this.supported = true,
+    this.granted = true,
+    this.acceptQueue = true,
+  });
 
   /// false 模拟「这个平台没实现」，用于验证降级路径
   final bool supported;
   final bool granted;
+
+  /// false 模拟「系统没接下排期」（iOS 没授权时的真实表现）
+  final bool acceptQueue;
 
   final List<NotificationPlan> scheduled = [];
   final List<int> shown = [];
@@ -99,6 +106,14 @@ class _FakeNotificationChannel implements NotificationChannel {
   @override
   Future<NotificationPermission> requestPermission() async =>
       granted ? NotificationPermission.granted : NotificationPermission.denied;
+
+  @override
+  Future<NotificationPermission> checkPermission() async =>
+      granted ? NotificationPermission.granted : NotificationPermission.denied;
+
+  @override
+  Future<int?> pendingCount() async =>
+      acceptQueue ? scheduled.length : 0;
 
   @override
   Future<void> schedule(NotificationPlan plan) async => scheduled.add(plan);
@@ -844,6 +859,97 @@ void main() {
       ];
       expect(sumPaidRent(rents, property.id), 3000);
       expect(sumYearlyExpense(rents, const [], property.id, 2026), 3000);
+    });
+  });
+
+  group('流浪天数：按自然日去重', () {
+    Property rented({
+      required String id,
+      required DateTime moveIn,
+      required DateTime end,
+      PropertyStatus status = PropertyStatus.active,
+    }) => Property(
+      id: id,
+      name: id,
+      address: '测试地址',
+      landlord: const Landlord(name: '房东', phone: '138****0000'),
+      contract: ContractInfo(moveInDate: moveIn, contractEnd: end),
+      status: status,
+      createdAt: moveIn,
+      updatedAt: moveIn,
+    );
+
+    final today = DateTime(2026, 10, 15);
+
+    test('同时在租的两套房，今天只算一天', () {
+      final days = countWanderingDays([
+        rented(id: 'a', moveIn: today, end: DateTime(2027, 10, 14)),
+        rented(id: 'b', moveIn: today, end: DateTime(2027, 10, 14)),
+      ], now: today);
+      expect(days, 1);
+    });
+
+    test('入住当天算一天；已退租的算到合同到期日（含当天）', () {
+      expect(
+        countWanderingDays([
+          rented(id: 'a', moveIn: DateTime(2026, 10, 1), end: DateTime(2027, 1, 1)),
+        ], now: today),
+        15,
+        reason: '10/1 入住到今天 10/15：15 天',
+      );
+      expect(
+        countWanderingDays([
+          rented(
+            id: 'h',
+            moveIn: DateTime(2026, 8, 1),
+            end: DateTime(2026, 8, 31),
+            status: PropertyStatus.ended,
+          ),
+        ], now: today),
+        31,
+        reason: '8/1 入住、8/31 搬走是 31 天，不是 30 天',
+      );
+    });
+
+    test('接着换房：前一段的最后一天与后一段的第一天不重复', () {
+      final days = countWanderingDays([
+        rented(
+          id: 'old',
+          moveIn: DateTime(2026, 8, 1),
+          end: DateTime(2026, 9, 30),
+          status: PropertyStatus.ended,
+        ),
+        rented(id: 'new', moveIn: DateTime(2026, 10, 1), end: DateTime(2027, 9, 30)),
+      ], now: today);
+      expect(days, 76, reason: '8/1–9/30 共 61 天 + 10/1–10/15 共 15 天');
+    });
+
+    test('重叠的租期不会被数两遍', () {
+      final days = countWanderingDays([
+        rented(
+          id: 'a',
+          moveIn: DateTime(2026, 3, 1),
+          end: DateTime(2026, 6, 30),
+          status: PropertyStatus.ended,
+        ),
+        rented(
+          id: 'b',
+          moveIn: DateTime(2026, 5, 1),
+          end: DateTime(2026, 6, 30),
+          status: PropertyStatus.ended,
+        ),
+      ], now: today);
+      expect(days, 122, reason: '并起来只算 3/1–6/30');
+    });
+
+    test('还没到入住日的不算，一套都没有就是 0', () {
+      expect(
+        countWanderingDays([
+          rented(id: 'future', moveIn: DateTime(2026, 11, 1), end: DateTime(2027, 11, 1)),
+        ], now: today),
+        0,
+      );
+      expect(countWanderingDays(const [], now: today), 0);
     });
   });
 
@@ -2813,6 +2919,9 @@ void groupWidgets() {
 
     // 测试环境里没有原生插件 → 服务应安静降级
     expect(find.text('提醒到点弹到系统通知栏'), findsOneWidget);
+    // 不支持也要把原因摆出来，否则真机上只看到「不支持」没法查
+    expect(find.textContaining('假通道：这个平台没实现通知'), findsOneWidget);
+    expect(find.text('复制原因'), findsOneWidget);
     await tester.tap(find.byType(Switch).first);
     await tester.pumpAndSettle();
 
@@ -2910,6 +3019,90 @@ void groupWidgets() {
       reason: '没拿到授权就别打开开关，否则用户以为会被提醒',
     );
     expect(find.textContaining('系统还没允许通知'), findsOneWidget);
+  });
+
+  testWidgets('系统通知：系统没接下排期时要说清楚，不能装作已开启', (tester) async {
+    tester.view.physicalSize = const Size(390, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    // 模拟 iOS 没授权时的情况：排期调用不报错，但系统一条都没接
+    final notifications = NotificationService(
+      channel: _FakeNotificationChannel(acceptQueue: false),
+    );
+    addTearDown(notifications.dispose);
+
+    await tester.runAsync(() async {
+      await seedSmokeData(repository);
+      await repository.updateSettings(
+        repository.settings.copyWith(systemNotifications: true),
+      );
+      notifications.attach(repository, syncNow: false);
+      await notifications.sync();
+    });
+
+    expect(notifications.plans, isNotEmpty);
+    expect(notifications.queuedCount, 0);
+    expect(notifications.lastError, contains('系统没有接下'));
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: ChangeNotifierProvider<NotificationService>.value(
+          value: notifications,
+          child: MaterialApp(
+            theme: ZTheme.light(),
+            home: const ReminderSettingsPage(),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('系统一条排期都没接下'), findsOneWidget);
+    notifications.detach();
+  });
+
+  testWidgets('提醒设置：开关已开但系统没授权时，给出「授权系统通知」入口', (tester) async {
+    tester.view.physicalSize = const Size(390, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    final notifications = NotificationService(
+      channel: _FakeNotificationChannel(granted: false),
+    );
+    addTearDown(notifications.dispose);
+
+    await tester.runAsync(() async {
+      await seedSmokeData(repository);
+      // 开关是上次留下的设置（比如从别的平台同步过来），但系统从没授权
+      await repository.updateSettings(
+        repository.settings.copyWith(systemNotifications: true),
+      );
+      notifications.attach(repository, syncNow: false);
+      await notifications.sync();
+    });
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: ChangeNotifierProvider<NotificationService>.value(
+          value: notifications,
+          child: MaterialApp(
+            theme: ZTheme.light(),
+            home: const ReminderSettingsPage(),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('授权系统通知'), findsOneWidget);
+    expect(find.textContaining('系统还没允许'), findsWidgets);
+    expect(notifications.permission, NotificationPermission.denied);
+    notifications.detach();
   });
 
   testWidgets('系统通知：已开启时列出接下来要提醒的事情', (tester) async {
@@ -3650,7 +3843,8 @@ void groupWidgets() {
       MultiProvider(
         providers: [
           ChangeNotifierProvider<Repository>.value(value: repository),
-          // 首页头部会读 Session（流浪天数），这个 Provider 不能少
+          // 首页头部的流浪天数现在读 Repository，这里留着 Session 是为了
+          // 走通「已登录」分支（部分子组件按登录态取文案）
           ChangeNotifierProvider<Session>.value(
             value: Session(repository.store),
           ),
@@ -5340,9 +5534,6 @@ void groupWidgets() {
 
     // 游客模式入口：点一下就完成选择，不需要再切面板
     expect(find.textContaining('数据只保存在这台设备'), findsOneWidget);
-    // enterGuestMode 内部会先落地「首次使用时间」（真实文件写入），
-    // 这里先在 runAsync 里完成它，避免被 FakeAsync 卡住后续步骤
-    await tester.runAsync(() => session.ensureFirstSeen());
     // 出错提示条会把按钮顶到屏幕外，先滚动到可见位置再点
     final guestEntry = find.text('游客模式进入');
     await tester.ensureVisible(guestEntry);

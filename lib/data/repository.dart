@@ -690,6 +690,10 @@ class Repository extends ChangeNotifier {
 
   double totalPaidRent(String propertyId) => sumPaidRent(_rents, propertyId);
 
+  /// 「流浪天数」：所有房源真正在租的天数合计，按自然日去重
+  /// （同时在租两套房的那些天只算一天）
+  int get wanderingDays => countWanderingDays(_properties);
+
   /// 已缴月数（与「累计已付租金」同源，避免两个口径打架）。
   int paidMonthsOf(String propertyId) => countPaidMonths(_rents, propertyId);
 

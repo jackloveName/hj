@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 
 import '../../data/repository.dart';
 import '../../models/models.dart';
-import '../../services/session.dart';
 import '../../theme/tokens.dart';
 import '../../utils/format.dart';
 import '../evidence/evidence_rooms_page.dart';
@@ -115,8 +114,7 @@ class _AllEndedEmpty extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final session = context.watch<Session>();
-    final days = session.daysSinceFirstSeen;
+    final days = context.watch<Repository>().wanderingDays;
     return Column(
       children: [
         Expanded(
@@ -155,8 +153,7 @@ class _WelcomeEmpty extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final session = context.watch<Session>();
-    final days = session.daysSinceFirstSeen;
+    final days = context.watch<Repository>().wanderingDays;
     return ColoredBox(
       color: Z.page,
       child: Column(
@@ -216,7 +213,10 @@ class _WelcomeEmpty extends StatelessWidget {
 }
 
 /// 一行式「你已流浪 N 天」：首页有房源 / 房子都退租时用这个，
-/// 横幅那一版留给「还没有房子」的空状态（那里还要多劝两句落地）
+/// 横幅那一版留给「还没有房子」的空状态（那里还要多劝两句落地）。
+///
+/// 天数按自然日去重（同时在租两套只算一天），所以「还没到入住日」时是 0，
+/// 这时候就不摆这一行了，免得出现「你已流浪 0 天」。
 class _WanderingLine extends StatelessWidget {
   const _WanderingLine({required this.days, this.onDark = false});
 
@@ -227,6 +227,7 @@ class _WanderingLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (days <= 0) return const SizedBox.shrink();
     final color = onDark ? Z.onDarkMuted : Z.ink3;
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -252,10 +253,15 @@ final class _WanderingBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (bg, fg) = ZTag.paletteOf(ZTone.warn);
-    final headline = days >= 30
+    // 一套房子都还没记（或还没到入住日）时天数是 0，换个说法别念「流浪 0 天」
+    final headline = days <= 0
+        ? '还没开始记录租住'
+        : days >= 30
         ? '你已流浪 $days 天了'
         : '你已流浪 $days 天';
-    final sub = days >= 30
+    final sub = days <= 0
+        ? '添一套房子，从入住那天起算你的流浪天数'
+        : days >= 30
         ? '多久没安顿下来了？是时候添个安心的居所'
         : '还差一步就能落地为家';
     return ZCard(
@@ -456,7 +462,7 @@ class _HeroHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final session = context.watch<Session>();
+    final days = context.watch<Repository>().wanderingDays;
     final contract = property.contract;
     final daysToRent = daysFromToday(nextRentDue(contract.rentDueDay));
     final daysToEnd = daysFromToday(contract.contractEnd);
@@ -569,7 +575,7 @@ class _HeroHeader extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           // 与「我的」页那行同一句文案：首页有房源时也看得到流浪天数
-          _WanderingLine(days: session.daysSinceFirstSeen, onDark: true),
+          _WanderingLine(days: days, onDark: true),
           const SizedBox(height: 14),
           Row(
             children: [
