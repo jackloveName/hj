@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../app_info.dart';
 import '../data/repository.dart';
+import '../services/api/api_settings.dart';
+import '../services/app_update.dart';
+import '../services/cloud_service.dart';
 import '../services/notification_service.dart';
 import '../services/session.dart';
 import '../theme/tokens.dart';
+import 'app_update_dialog.dart';
 import 'expense/expense_page.dart';
 import 'home/home_page.dart';
 import 'kit.dart';
@@ -37,12 +42,67 @@ class AppShell extends StatefulWidget {
   State<AppShell> createState() => _AppShellState();
 }
 
-class _AppShellState extends State<AppShell> {
+class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   int _index = 0;
   String? _shownError;
   NotificationService? _notifications;
   Session? _session;
   bool _wasLoggedIn = false;
+
+  /// 正在查，避免连点标签页 / 前后台来回切时并发请求
+  bool _checkingUpdate = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // 前后台切换要能重新查更新
+    WidgetsBinding.instance.addObserver(this);
+    // 进 App 后的第一屏就是首页，所以更新检查挂在这里：
+    // 弹窗正好落在首页上，也不会盖在「同意协议」页或登录页上。
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkUpdateOnHome());
+  }
+
+  /// 从后台切回来时：如果停在首页，重新查一次更新
+  /// （用户切出去逛了一圈再回来，正是想知道有没有新版的时候）
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    if (_index != 0) return;
+    _checkUpdateOnHome();
+  }
+
+  /// 切标签页：回到「首页」就再查一次更新
+  void _selectTab(int value) {
+    setState(() => _index = value);
+    if (value == 0) _checkUpdateOnHome();
+  }
+
+  /// 进首页时的静默更新检查：有更高版本就弹升级框。
+  ///
+  /// 刻意**不记**「这个版本弹过」：每次进首页（进 App、切回首页、从后台回来）
+  /// 都重新问一次服务端，只要有更新就弹 —— 用户点掉之后，再进首页还会弹。
+  /// 请求失败不打扰用户，下次进首页再试。
+  Future<void> _checkUpdateOnHome() async {
+    if (_checkingUpdate) return;
+    _checkingUpdate = true;
+    try {
+      final raw = await context.read<CloudService>().config.readSystemConfig(
+        ApiSettings.appBrand,
+      );
+      if (!mounted) return;
+      final info = newerUpdate(raw, kAppVersion);
+      if (info == null) return;
+      await showAppUpdateDialog(
+        context: context,
+        info: info,
+        currentVersion: kAppVersion,
+      );
+    } catch (_) {
+      // 后台检查失败不打扰用户，下次回首页再试
+    } finally {
+      _checkingUpdate = false;
+    }
+  }
 
   @override
   void didChangeDependencies() {
@@ -66,7 +126,7 @@ class _AppShellState extends State<AppShell> {
     if (loggedIn == _wasLoggedIn) return;
     _wasLoggedIn = loggedIn;
     if (!loggedIn || !mounted) return;
-    setState(() => _index = 0);
+    _selectTab(0);
   }
 
   /// 点系统通知进来时，直接落到对应的标签页
@@ -85,6 +145,7 @@ class _AppShellState extends State<AppShell> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _notifications?.removeListener(_onNotificationTap);
     _session?.removeListener(_onSessionChanged);
     super.dispose();
@@ -121,10 +182,7 @@ class _AppShellState extends State<AppShell> {
         Expanded(
           child: IndexedStack(index: _index, children: _pages),
         ),
-        _TabBar(
-          index: _index,
-          onChanged: (value) => setState(() => _index = value),
-        ),
+        _TabBar(index: _index, onChanged: _selectTab),
       ],
     );
 
@@ -147,7 +205,6 @@ class _AppShellState extends State<AppShell> {
       ),
     );
   }
-
 }
 
 /// 底部 Tab —— 对应设计稿 .tabbar

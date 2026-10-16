@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -116,8 +117,7 @@ class _FakeNotificationChannel implements NotificationChannel {
       granted ? NotificationPermission.granted : NotificationPermission.denied;
 
   @override
-  Future<int?> pendingCount() async =>
-      acceptQueue ? scheduled.length : 0;
+  Future<int?> pendingCount() async => acceptQueue ? scheduled.length : 0;
 
   @override
   Future<void> schedule(NotificationPlan plan) async => scheduled.add(plan);
@@ -526,11 +526,7 @@ void main() {
       );
       final marchBefore = before.firstWhere((r) => r.month == '2026-03');
       expect(marchBefore.status, RentStatus.pending);
-      expect(
-        marchBefore.paidDate,
-        isNull,
-        reason: '还没到交租日，不该默认「已缴 1 个月」',
-      );
+      expect(marchBefore.paidDate, isNull, reason: '还没到交租日，不该默认「已缴 1 个月」');
 
       // 到了交租日当天：默认已交（签合同时付首月是常态）
       final onDay = buildRentSchedule(
@@ -612,9 +608,7 @@ void main() {
     test('待办说法：交租当天是「就是今天」，前一天是「明天」', () {
       // 交租日 13 号，就在今天
       final today = build(DateTime(2026, 3, 13));
-      final rentToday = today.firstWhere(
-        (r) => r.kind == ReminderKind.rentDue,
-      );
+      final rentToday = today.firstWhere((r) => r.kind == ReminderKind.rentDue);
       expect(rentToday.daysLeft, 0);
       expect(rentToday.actionLabel, '就是今天', reason: '别写成「0 天后」');
 
@@ -769,15 +763,10 @@ void main() {
     });
 
     test('缺入住表底数就提醒补，补齐了自己消失', () {
-      final missing = build(
-        DateTime(2026, 3, 20),
-      ).firstWhere((r) => r.kind == ReminderKind.moveInReading);
+      final missing = build(DateTime(2026, 3, 20))
+          .firstWhere((r) => r.kind == ReminderKind.moveInReading);
       expect(missing.title, contains('水/电'));
-      expect(
-        missing.subtitle,
-        isEmpty,
-        reason: '标题已经说清是哪几块表，再补一句副标题纯属重复占地方',
-      );
+      expect(missing.subtitle, isEmpty, reason: '标题已经说清是哪几块表，再补一句副标题纯属重复占地方');
 
       Property withReadings({double? elec, double? water, double? gas}) =>
           property.copyWith(
@@ -1174,7 +1163,11 @@ void main() {
     test('入住当天算一天；已退租的算到退租日（含当天）', () {
       expect(
         countWanderingDays([
-          rented(id: 'a', moveIn: DateTime(2026, 10, 1), end: DateTime(2027, 1, 1)),
+          rented(
+            id: 'a',
+            moveIn: DateTime(2026, 10, 1),
+            end: DateTime(2027, 1, 1),
+          ),
         ], now: today),
         15,
         reason: '10/1 入住到今天 10/15：15 天',
@@ -1195,21 +1188,20 @@ void main() {
 
     test('提前退租：算到退租日，不把合同剩下的日子（含未来）算进来', () {
       // 8/1 入住、9/30 就搬走了，但合同签到 12/31
-      final early = rented(
-        id: 'early',
-        moveIn: DateTime(2026, 8, 1),
-        end: DateTime(2026, 12, 31),
-        status: PropertyStatus.ended,
-      ).copyWith(
-        deposit: const DepositInfo(
-          status: DepositStatus.returned,
-          returnedDate: null,
-        ),
-      );
+      final early =
+          rented(
+            id: 'early',
+            moveIn: DateTime(2026, 8, 1),
+            end: DateTime(2026, 12, 31),
+            status: PropertyStatus.ended,
+          ).copyWith(
+            deposit: const DepositInfo(
+              status: DepositStatus.returned,
+              returnedDate: null,
+            ),
+          );
       expect(
-        countWanderingDays([
-          early,
-        ], now: today),
+        countWanderingDays([early], now: today),
         76,
         reason: '没有退租记录时退回合同到期日，但不会超过今天（8/1–10/15 共 76 天）',
       );
@@ -1219,9 +1211,7 @@ void main() {
         deposit: early.deposit.copyWith(returnedDate: DateTime(2026, 9, 30)),
       );
       expect(
-        countWanderingDays([
-          withReturn,
-        ], now: today),
+        countWanderingDays([withReturn], now: today),
         61,
         reason: '8/1–9/30 共 61 天',
       );
@@ -1235,7 +1225,11 @@ void main() {
           end: DateTime(2026, 9, 30),
           status: PropertyStatus.ended,
         ),
-        rented(id: 'new', moveIn: DateTime(2026, 10, 1), end: DateTime(2027, 9, 30)),
+        rented(
+          id: 'new',
+          moveIn: DateTime(2026, 10, 1),
+          end: DateTime(2027, 9, 30),
+        ),
       ], now: today);
       expect(days, 76, reason: '8/1–9/30 共 61 天 + 10/1–10/15 共 15 天');
     });
@@ -1261,7 +1255,11 @@ void main() {
     test('还没到入住日的不算，一套都没有就是 0', () {
       expect(
         countWanderingDays([
-          rented(id: 'future', moveIn: DateTime(2026, 11, 1), end: DateTime(2027, 11, 1)),
+          rented(
+            id: 'future',
+            moveIn: DateTime(2026, 11, 1),
+            end: DateTime(2027, 11, 1),
+          ),
         ], now: today),
         0,
       );
@@ -1517,46 +1515,49 @@ void main() {
   });
 
   groupApi();
-    test('入住时长文案：未入住时不说「已入住 -N 天」', () {
-      final today = DateTime(2026, 10, 12);
-      expect(stayDurationLabel(DateTime(2026, 10, 12), now: today), '今天入住');
-      expect(stayDurationLabel(DateTime(2026, 10, 2), now: today), '已入住 10 天');
-      expect(stayDurationLabel(DateTime(2026, 10, 20), now: today), '距入住 8 天');
-    });
-    test('云端合并：同月租金与抄表只保留云端那条', () {
-      final cloud = {
-        'version': 1,
-        'properties': <Object>[],
-        'photos': <Object>[],
-        'rents': [
-          {'id': 'cloud-rent', 'propertyId': 'p1', 'month': '2026-10'},
-        ],
-        'utilities': [
-          {'id': 'cloud-util', 'propertyId': 'p1', 'month': '2026-10'},
-        ],
-      };
-      final local = {
-        'version': 1,
-        'properties': <Object>[],
-        'photos': <Object>[],
-        'rents': [
-          {'id': 'local-rent', 'propertyId': 'p1', 'month': '2026-10'},
-          {'id': 'local-rent-9', 'propertyId': 'p1', 'month': '2026-09'},
-        ],
-        'utilities': [
-          {'id': 'local-util', 'propertyId': 'p1', 'month': '2026-10'},
-        ],
-      };
-      final merged = mergeDatasets(cloud, local);
-      final rents = (merged['rents']! as List).cast<Map<String, dynamic>>();
-      // 10 月只留云端那条，9 月本机独有的补进来
-      expect(rents.where((r) => r['month'] == '2026-10'), hasLength(1));
-      expect(rents.firstWhere((r) => r['month'] == '2026-10')['id'], 'cloud-rent');
-      expect(rents.where((r) => r['month'] == '2026-09'), hasLength(1));
-      final utils = (merged['utilities']! as List).cast<Map<String, dynamic>>();
-      expect(utils, hasLength(1));
-      expect(utils.first['id'], 'cloud-util');
-    });
+  test('入住时长文案：未入住时不说「已入住 -N 天」', () {
+    final today = DateTime(2026, 10, 12);
+    expect(stayDurationLabel(DateTime(2026, 10, 12), now: today), '今天入住');
+    expect(stayDurationLabel(DateTime(2026, 10, 2), now: today), '已入住 10 天');
+    expect(stayDurationLabel(DateTime(2026, 10, 20), now: today), '距入住 8 天');
+  });
+  test('云端合并：同月租金与抄表只保留云端那条', () {
+    final cloud = {
+      'version': 1,
+      'properties': <Object>[],
+      'photos': <Object>[],
+      'rents': [
+        {'id': 'cloud-rent', 'propertyId': 'p1', 'month': '2026-10'},
+      ],
+      'utilities': [
+        {'id': 'cloud-util', 'propertyId': 'p1', 'month': '2026-10'},
+      ],
+    };
+    final local = {
+      'version': 1,
+      'properties': <Object>[],
+      'photos': <Object>[],
+      'rents': [
+        {'id': 'local-rent', 'propertyId': 'p1', 'month': '2026-10'},
+        {'id': 'local-rent-9', 'propertyId': 'p1', 'month': '2026-09'},
+      ],
+      'utilities': [
+        {'id': 'local-util', 'propertyId': 'p1', 'month': '2026-10'},
+      ],
+    };
+    final merged = mergeDatasets(cloud, local);
+    final rents = (merged['rents']! as List).cast<Map<String, dynamic>>();
+    // 10 月只留云端那条，9 月本机独有的补进来
+    expect(rents.where((r) => r['month'] == '2026-10'), hasLength(1));
+    expect(
+      rents.firstWhere((r) => r['month'] == '2026-10')['id'],
+      'cloud-rent',
+    );
+    expect(rents.where((r) => r['month'] == '2026-09'), hasLength(1));
+    final utils = (merged['utilities']! as List).cast<Map<String, dynamic>>();
+    expect(utils, hasLength(1));
+    expect(utils.first['id'], 'cloud-util');
+  });
 
   test('合同新增字段：序列化往返 + 旧数据读默认值', () {
     final contract = ContractInfo(
@@ -1691,9 +1692,7 @@ void main() {
       ],
       'settings': {'userName': '未来的我'},
     });
-    await tester.runAsync(
-      () => repository.store.setString(key, future),
-    );
+    await tester.runAsync(() => repository.store.setString(key, future));
 
     // 换一个作用域再换回来，触发一次真正的重新加载
     await tester.runAsync(() async {
@@ -1711,11 +1710,7 @@ void main() {
         repository.settings.copyWith(userName: '本机新名字'),
       ),
     );
-    expect(
-      repository.store.getString(key),
-      future,
-      reason: '只读保护下原数据必须一字不改',
-    );
+    expect(repository.store.getString(key), future, reason: '只读保护下原数据必须一字不改');
   });
 
   test('删除标记：删掉的记录不会再被云端合并回来', () {
@@ -1891,7 +1886,10 @@ void main() {
     );
 
     // 覆盖同一条不会重复计数
-    await idb.put('media:p1/a.jpg', Uint8List.fromList(List<int>.filled(10, 1)));
+    await idb.put(
+      'media:p1/a.jpg',
+      Uint8List.fromList(List<int>.filled(10, 1)),
+    );
     expect(await idb.totalBytes(), 10 + thumb.length);
 
     await idb.delete('media:p1/a.jpg');
@@ -1905,27 +1903,18 @@ void main() {
   test('字体分工：界面用子集、PDF 用全量（别弄反）', () {
     final uiRegular = File('assets/fonts/NotoSansSC-Regular.ttf').lengthSync();
     final uiBold = File('assets/fonts/NotoSansSC-Bold.ttf').lengthSync();
-    final pdfRegular = File(
-      'assets/fonts/pdf/NotoSansSC-Regular.ttf',
-    ).lengthSync();
+    final pdfRegular = File('assets/fonts/pdf/NotoSansSC-Regular.ttf')
+        .lengthSync();
     final pdfBold = File('assets/fonts/pdf/NotoSansSC-Bold.ttf').lengthSync();
 
     // 界面字体只带 App 用到的字：几百 KB 级别
     for (final size in [uiRegular, uiBold]) {
       expect(size, greaterThan(120 * 1024), reason: '子集不该小到没字形');
-      expect(
-        size,
-        lessThan(600 * 1024),
-        reason: '界面字体应该是子集（否则 Web 首屏白下几 MB）',
-      );
+      expect(size, lessThan(600 * 1024), reason: '界面字体应该是子集（否则 Web 首屏白下几 MB）');
     }
     // PDF 字体必须保留全量：报告里的生僻字不能变 □
     for (final size in [pdfRegular, pdfBold]) {
-      expect(
-        size,
-        greaterThan(1500 * 1024),
-        reason: 'PDF 必须用全量字体，别被换成子集',
-      );
+      expect(size, greaterThan(1500 * 1024), reason: 'PDF 必须用全量字体，别被换成子集');
     }
   });
 
@@ -1953,7 +1942,8 @@ void main() {
     expect(
       requested.where((key) => key.startsWith('assets/fonts/pdf/')),
       isEmpty,
-      reason: 'PDF 全量字体只能等真正导出 PDF 时再取，'
+      reason:
+          'PDF 全量字体只能等真正导出 PDF 时再取，'
           '放在启动路径上等于每个用户首屏多下 4MB',
     );
   });
@@ -2136,7 +2126,11 @@ void main() {
 
   test('系统通知计划：id 稳定、按时间升序、换房子不串号', () {
     final reminders = [
-      reminderOf(ReminderKind.rentDue, date: DateTime(2026, 11, 1), daysLeft: 5),
+      reminderOf(
+        ReminderKind.rentDue,
+        date: DateTime(2026, 11, 1),
+        daysLeft: 5,
+      ),
       reminderOf(
         ReminderKind.contractExpire,
         date: DateTime(2027, 3, 1),
@@ -2179,9 +2173,10 @@ void main() {
       now: DateTime(2026, 10, 27, 8),
     );
     expect(
-      other.map((p) => p.id).toSet().intersection(
-        first.map((p) => p.id).toSet(),
-      ),
+      other
+          .map((p) => p.id)
+          .toSet()
+          .intersection(first.map((p) => p.id).toSet()),
       isEmpty,
       reason: '两套房子的通知不能撞 id，否则会互相顶掉',
     );
@@ -2209,7 +2204,10 @@ void groupApi() {
       expect(
         resolveApiResponse(
           statusCode: 200,
-          body: {'code': '00000', 'data': {'accessToken': 'T'}},
+          body: {
+            'code': '00000',
+            'data': {'accessToken': 'T'},
+          },
         ),
         {'accessToken': 'T'},
       );
@@ -2219,10 +2217,9 @@ void groupApi() {
         {'code': '200', 'msg': 'ok'},
       );
       // 无 code 字段也算成功
-      expect(
-        resolveApiResponse(statusCode: 200, body: {'ok': true}),
-        {'ok': true},
-      );
+      expect(resolveApiResponse(statusCode: 200, body: {'ok': true}), {
+        'ok': true,
+      });
       // 401 / A000401 → 登录失效
       for (final code in ['401', '000401', 'A000401']) {
         expect(
@@ -2493,7 +2490,9 @@ void groupApi() {
     });
 
     test('游客态：拍的图片也不会留在本机（下次以游客身份启动就清掉）', () async {
-      final temp = Directory.systemTemp.createTempSync('zudun_guest_media_test');
+      final temp = Directory.systemTemp.createTempSync(
+        'zudun_guest_media_test',
+      );
       addTearDown(() => _cleanTemp(temp));
       const channel = MethodChannel('plugins.flutter.io/path_provider');
       final messenger =
@@ -2519,7 +2518,8 @@ void groupApi() {
   });
 
   group('CloudService 端到端（假网关）', () {
-    Future<(Repository, Session, ApiSettings, List<http.Request>)> setup() async {
+    Future<(Repository, Session, ApiSettings, List<http.Request>)>
+    setup() async {
       final temp = Directory.systemTemp.createTempSync('zudun_cloud_test');
       addTearDown(() => _cleanTemp(temp));
       const channel = MethodChannel('plugins.flutter.io/path_provider');
@@ -2635,9 +2635,7 @@ void groupApi() {
       // Token 通过 Authorization 头发送
       expect(
         requests
-            .lastWhere(
-              (request) => request.url.path.endsWith('/other/save'),
-            )
+            .lastWhere((request) => request.url.path.endsWith('/other/save'))
             .headers['Authorization'],
         'T-123',
       );
@@ -2807,10 +2805,7 @@ void groupApi() {
       await tester.pumpWidget(
         ChangeNotifierProvider<Repository>.value(
           value: repository,
-          child: MaterialApp(
-            theme: ZTheme.light(),
-            home: const TenancyPage(),
-          ),
+          child: MaterialApp(theme: ZTheme.light(), home: const TenancyPage()),
         ),
       );
       await tester.pumpAndSettle();
@@ -2899,10 +2894,7 @@ void groupApi() {
       await tester.pumpWidget(
         ChangeNotifierProvider<Repository>.value(
           value: repository,
-          child: MaterialApp(
-            theme: ZTheme.light(),
-            home: const TenancyPage(),
-          ),
+          child: MaterialApp(theme: ZTheme.light(), home: const TenancyPage()),
         ),
       );
       await tester.pumpAndSettle();
@@ -2991,9 +2983,7 @@ void groupApi() {
 
     test('登录后把只在本机的照片补传云端，成功就清掉本机原件', () async {
       final repository = await openMediaRepository();
-      final bytes = Uint8List.fromList(
-        List.generate(32, (index) => index + 1),
-      );
+      final bytes = Uint8List.fromList(List.generate(32, (index) => index + 1));
 
       // 游客态 / 没登录：先只留在本机
       final localRef = await repository.saveMedia(
@@ -3078,6 +3068,7 @@ class _FakeBridge implements CloudBridge {
   @override
   void schedulePush() {}
 }
+
 /// 主要页面冒烟：这种「无界高度」的布局问题只有点进去才会炸，
 /// 所以每个页面单独一个用例渲染一遍。新增页面时记得往这里加一行。
 void groupSmoke() {
@@ -3207,11 +3198,7 @@ Future<void> _pumpSmokePage(
       await tester.drag(scrollable.first, const Offset(0, -600));
       await tester.pumpAndSettle();
       final scrolled = lightSurfaceOffenders(tester);
-      expect(
-        scrolled,
-        isEmpty,
-        reason: '$label：往下滚之后出现了近白底色块',
-      );
+      expect(scrolled, isEmpty, reason: '$label：往下滚之后出现了近白底色块');
     }
   }
 }
@@ -3365,10 +3352,7 @@ Future<Repository> openTestRepository(WidgetTester tester) async {
   // 默认当作「用户上次已经同意过协议」：首次启动弹窗是模态的，
   // 不预置就会挡住其它用例的操作；要验证弹窗本身的用例自己把这条清掉。
   await tester.runAsync(
-    () => repository.store.setString(
-      kPrivacyConsentKey,
-      zudunProtocolVersion,
-    ),
+    () => repository.store.setString(kPrivacyConsentKey, zudunProtocolVersion),
   );
   return repository;
 }
@@ -3419,11 +3403,7 @@ void groupWidgets() {
       isFalse,
       reason: '拿不到权限就不该把开关打开',
     );
-    expect(
-      notifications.available,
-      isFalse,
-      reason: '测试环境没有原生插件，应标记为不可用',
-    );
+    expect(notifications.available, isFalse, reason: '测试环境没有原生插件，应标记为不可用');
   });
 
   testWidgets('系统通知：开启后按计划排期，关掉就清空', (tester) async {
@@ -3444,11 +3424,7 @@ void groupWidgets() {
 
     expect(notifications.enabled, isTrue);
     expect(channel.scheduled, isNotEmpty, reason: '开了开关就该把提醒排给系统');
-    expect(
-      channel.cancelAllCount,
-      0,
-      reason: '重排只能清「待触发」的，不能把通知栏里已弹出的提醒撤掉',
-    );
+    expect(channel.cancelAllCount, 0, reason: '重排只能清「待触发」的，不能把通知栏里已弹出的提醒撤掉');
     expect(channel.cancelPendingCount, greaterThan(0));
     expect(
       channel.scheduled.map((item) => item.id).toSet(),
@@ -3632,11 +3608,7 @@ void groupWidgets() {
     expect(tester.takeException(), isNull);
     // 排得好好的时候不再写状态行（以前这里报「已开启，系统里已排好 N 条提醒」）
     expect(find.textContaining('已开启'), findsNothing);
-    expect(
-      find.text('发一条测试通知'),
-      findsNothing,
-      reason: '页面不再摆测试通知按钮，通不通看排期清单',
-    );
+    expect(find.text('发一条测试通知'), findsNothing, reason: '页面不再摆测试通知按钮，通不通看排期清单');
     // 清单要能一眼看出「排了哪些、一共几条、几点响」
     expect(find.text('接下来要提醒的'), findsOneWidget);
     expect(
@@ -3657,9 +3629,7 @@ void groupWidgets() {
     );
   });
 
-  testWidgets('提醒设置：不再摆「发一条测试通知」按钮，失败原因仍要说清楚', (
-    tester,
-  ) async {
+  testWidgets('提醒设置：不再摆「发一条测试通知」按钮，失败原因仍要说清楚', (tester) async {
     tester.view.physicalSize = const Size(390, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -3762,6 +3732,191 @@ void groupWidgets() {
     expect(find.text('导出对比报告 PDF'), findsOneWidget);
   });
 
+  testWidgets('首页：进 App 时有新版本才弹更新框', (tester) async {
+    tester.view.physicalSize = const Size(390, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    // 真机跑的是 iOS 包：这里也让平台判定走 iOS，才会读 iosAppVersion 那套字段
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    // 必须在用例体内复位（测试框架会检查这个调试变量没被留下），
+    // 所以用 try/finally 包住，哪怕断言失败也不会漏
+    try {
+      final repository = await openTestRepository(tester);
+      await tester.runAsync(() => seedSmokeData(repository));
+      final session = Session(repository.store);
+      await tester.runAsync(() => session.enterGuestMode());
+      final settings = ApiSettings(repository.store);
+      final notifications = NotificationService();
+      addTearDown(notifications.dispose);
+
+      /// 进 App（AppShell 第一屏就是首页），版本配置由假网关给
+      Future<void> pumpApp(String version) async {
+        final cloud = CloudService(
+          repository: repository,
+          session: session,
+          settings: settings,
+          httpClient: MockClient((request) async {
+            // 版本更新读系统配置，键名就是应用标识（ApiSettings.appBrand）
+            if (request.url.path.contains('/get/value/config/')) {
+              return _jsonResponse({
+                'code': '00000',
+                'data': {
+                  'paramValue': jsonEncode({
+                    'iosAppVersion': version,
+                    'iosAppDownloadUrl':
+                        'https://apps.apple.com/app/id1234567890',
+                    'iosUpdateType': 1,
+                  }),
+                },
+              });
+            }
+            return _jsonResponse({'code': '00000', 'data': {}});
+          }),
+        );
+        addTearDown(cloud.dispose);
+        await tester.pumpWidget(
+          MultiProvider(
+            providers: [
+              ChangeNotifierProvider<Repository>.value(value: repository),
+              ChangeNotifierProvider<Session>.value(value: session),
+              ChangeNotifierProvider<CloudService>.value(value: cloud),
+              Provider<ApiSettings>.value(value: settings),
+              ChangeNotifierProvider<NotificationService>.value(
+                value: notifications,
+              ),
+            ],
+            child: MaterialApp(theme: ZTheme.light(), home: const AppShell()),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      }
+
+      // 有新版本：弹窗就落在首页上（下面是首页，不是别的标签页）
+      await pumpApp('9.9.9');
+      expect(find.text('发现新版本 v9.9.9'), findsOneWidget);
+      expect(
+        find.textContaining('https://'),
+        findsNothing,
+        reason: '弹窗里不显示下载地址，只显示版本号',
+      );
+      expect(find.text('立即更新'), findsOneWidget);
+      expect(
+        find.byIcon(Icons.home_rounded),
+        findsOneWidget,
+        reason: '弹更新框时底下停在首页',
+      );
+      await tester.tap(find.text('稍后再说'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('发现新版本'), findsNothing);
+
+      // 没有更高版本：首页安静，什么都不弹
+      await pumpApp('1.0.1');
+      expect(find.textContaining('发现新版本'), findsNothing);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('首页：切回首页与从后台回来都会重新检查更新', (tester) async {
+    tester.view.physicalSize = const Size(390, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    try {
+      final repository = await openTestRepository(tester);
+      await tester.runAsync(() => seedSmokeData(repository));
+      final session = Session(repository.store);
+      await tester.runAsync(() => session.enterGuestMode());
+      final settings = ApiSettings(repository.store);
+      final notifications = NotificationService();
+      addTearDown(notifications.dispose);
+
+      // 服务端版本号可改：用来验证「每次回首页都会重新查」
+      var serverVersion = '1.0.1';
+      final cloud = CloudService(
+        repository: repository,
+        session: session,
+        settings: settings,
+        httpClient: MockClient((request) async {
+          if (request.url.path.contains('/get/value/config/')) {
+            return _jsonResponse({
+              'code': '00000',
+              'data': {
+                'paramValue': jsonEncode({
+                  'iosAppVersion': serverVersion,
+                  'iosAppDownloadUrl':
+                      'https://apps.apple.com/app/id1234567890',
+                  'iosUpdateType': 1,
+                }),
+              },
+            });
+          }
+          return _jsonResponse({'code': '00000', 'data': {}});
+        }),
+      );
+      addTearDown(cloud.dispose);
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<Repository>.value(value: repository),
+            ChangeNotifierProvider<Session>.value(value: session),
+            ChangeNotifierProvider<CloudService>.value(value: cloud),
+            Provider<ApiSettings>.value(value: settings),
+            ChangeNotifierProvider<NotificationService>.value(
+              value: notifications,
+            ),
+          ],
+          child: MaterialApp(theme: ZTheme.light(), home: const AppShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('发现新版本'),
+        findsNothing,
+        reason: '进首页时服务端说 1.0.1，和当前版本一样，不弹',
+      );
+
+      // 切后台再回来（停在首页）→ 重新查，这次服务端有新版本
+      serverVersion = '9.9.9';
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(find.text('发现新版本 v9.9.9'), findsOneWidget);
+      await tester.tap(find.text('稍后再说'));
+      await tester.pumpAndSettle();
+
+      // 不按版本号记账：同一个版本再从后台回来，照样弹
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('发现新版本 v9.9.9'),
+        findsOneWidget,
+        reason: '每次进首页都查、有更新就弹，不记「这个版本弹过」',
+      );
+      await tester.tap(find.text('稍后再说'));
+      await tester.pumpAndSettle();
+
+      // 停在「我的」时从后台回来不弹（回到首页才查）……
+      serverVersion = '10.0.0';
+      await tester.tap(find.byIcon(Icons.person_outline_rounded));
+      await tester.pumpAndSettle();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('发现新版本'), findsNothing, reason: '不在首页时不打扰');
+
+      // ……切回「首页」立刻重查，新版本弹出来
+      await tester.tap(find.byIcon(Icons.home_outlined));
+      await tester.pumpAndSettle();
+      expect(find.text('发现新版本 v10.0.0'), findsOneWidget);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
   testWidgets('点系统通知进来会落到对应标签页', (tester) async {
     tester.view.physicalSize = const Size(390, 900);
     tester.view.devicePixelRatio = 1;
@@ -3838,11 +3993,7 @@ void groupWidgets() {
     final back = tester.getCenter(find.byType(ZBackButton));
     final title = tester.getCenter(find.text('入住取证'));
     expect(back.dy, closeTo(bar.center.dy, 1));
-    expect(
-      (back.dy - title.dy).abs(),
-      lessThan(1),
-      reason: '返回键要跟标题同高',
-    );
+    expect((back.dy - title.dy).abs(), lessThan(1), reason: '返回键要跟标题同高');
   });
 
   testWidgets('二级页面统一用同一个返回键组件', (tester) async {
@@ -4035,10 +4186,7 @@ void groupWidgets() {
   });
 
   test('维修承担方：新增「共同承担」，序列化与旧数据都兼容', () {
-    expect(
-      CostBearer.values.map((bearer) => bearer.label),
-      contains('共同承担'),
-    );
+    expect(CostBearer.values.map((bearer) => bearer.label), contains('共同承担'));
     expect(CostBearer.shared.label, '共同承担');
 
     // 往返
@@ -4051,7 +4199,10 @@ void groupWidgets() {
       cost: 100,
       costPaidBy: CostBearer.shared,
     );
-    expect(RepairRecord.fromJson(repair.toJson()).costPaidBy, CostBearer.shared);
+    expect(
+      RepairRecord.fromJson(repair.toJson()).costPaidBy,
+      CostBearer.shared,
+    );
 
     // 老数据里没见过的值仍回落到「待确认」，不会读崩
     final legacy = RepairRecord.fromJson({
@@ -4207,10 +4358,7 @@ void groupWidgets() {
     expect(chipOf('押金').selected, isTrue);
     expect(chipOf('维修').selected, isTrue, reason: '标签要能同时选中多个');
 
-    await tester.enterText(
-      find.byType(TextField).first,
-      '房东说押金和维修一起算',
-    );
+    await tester.enterText(find.byType(TextField).first, '房东说押金和维修一起算');
     await tester.pumpAndSettle();
     await tester.tap(find.text('保存'));
     await tester.pumpAndSettle();
@@ -4282,7 +4430,10 @@ void groupWidgets() {
       findsWidgets,
       reason: '改完读数要立刻反映到表计读数上',
     );
-    expect(repository.utilityOfMonth('p1', thisMonth)?.electricity?.reading, 1350);
+    expect(
+      repository.utilityOfMonth('p1', thisMonth)?.electricity?.reading,
+      1350,
+    );
     expect(
       repository.utilityOfMonth('p1', thisMonth)?.electricity?.previousReading,
       1200,
@@ -4623,9 +4774,7 @@ void groupWidgets() {
     expect(find.byType(AboutPage), findsOneWidget);
   });
 
-  testWidgets('我的：全部房源的租房账本（总租金 / 总租住天数 / 平均租金）', (
-    tester,
-  ) async {
+  testWidgets('我的：全部房源的租房账本（总租金 / 总租住天数 / 平均租金）', (tester) async {
     tester.view.physicalSize = const Size(390, 1200);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -4855,11 +5004,7 @@ void groupWidgets() {
     await tester.pumpAndSettle();
     expect(find.text('退出登录'), findsOneWidget);
     expect(find.text('注销账号'), findsOneWidget);
-    expect(
-      find.textContaining('已同步'),
-      findsNothing,
-      reason: '账号页不摆同步状态',
-    );
+    expect(find.textContaining('已同步'), findsNothing, reason: '账号页不摆同步状态');
 
     await tester.pumpWidget(
       MaterialApp(theme: ZTheme.light(), home: const LegalGuidePage()),
@@ -5048,8 +5193,7 @@ void groupWidgets() {
     await tester.enterText(
       find.byWidgetPredicate(
         (widget) =>
-            widget is TextField &&
-            widget.decoration?.labelText == '房东扣掉的金额',
+            widget is TextField && widget.decoration?.labelText == '房东扣掉的金额',
       ),
       '2000',
     );
@@ -5107,11 +5251,7 @@ void groupWidgets() {
     );
     await tester.pumpAndSettle();
 
-    expect(
-      find.text('去纠纷'),
-      findsNothing,
-      reason: '已经在维权流程里了，再点一次只是把状态重写一遍',
-    );
+    expect(find.text('去纠纷'), findsNothing, reason: '已经在维权流程里了，再点一次只是把状态重写一遍');
     expect(find.text('去退租'), findsOneWidget, reason: '退租那条还在');
   });
 
@@ -5288,11 +5428,7 @@ void groupWidgets() {
     await tester.pumpWidget(const SizedBox.shrink());
     await pumpDetail();
     expect(find.text('押金未退'), findsNothing);
-    expect(
-      find.text('押金已退到手'),
-      findsNothing,
-      reason: '已退还就不能在这一页改了',
-    );
+    expect(find.text('押金已退到手'), findsNothing, reason: '已退还就不能在这一页改了');
     expect(find.textContaining('押金 ¥6,000 已全额退还'), findsOneWidget);
   });
 
@@ -5319,10 +5455,7 @@ void groupWidgets() {
     await tester.pumpWidget(
       ChangeNotifierProvider<Repository>.value(
         value: repository,
-        child: MaterialApp(
-          theme: ZTheme.light(),
-          home: const HistoryPage(),
-        ),
+        child: MaterialApp(theme: ZTheme.light(), home: const HistoryPage()),
       ),
     );
     await tester.pumpAndSettle();
@@ -5347,11 +5480,7 @@ void groupWidgets() {
       findsOneWidget,
       reason: '租住回顾里也要说清押金没到手',
     );
-    expect(
-      find.text('押金未退'),
-      findsOneWidget,
-      reason: '押金没退就在回顾卡上挂颗胶囊，一眼看得到',
-    );
+    expect(find.text('押金未退'), findsOneWidget, reason: '押金没退就在回顾卡上挂颗胶囊，一眼看得到');
   });
 
   testWidgets('退租：部分扣除没填金额/理由时拦住，不动房源', (tester) async {
@@ -5518,11 +5647,7 @@ void groupWidgets() {
     expect(find.text('维权材料'), findsNothing);
     expect(find.text('13 个字段'), findsNothing, reason: '模块网格收掉了');
     for (final section in ['合同信息', '入住取证', '房东要求', '维修记录', '沟通记录']) {
-      expect(
-        find.text(section),
-        findsOneWidget,
-        reason: '$section 要以只读段落出现',
-      );
+      expect(find.text(section), findsOneWidget, reason: '$section 要以只读段落出现');
     }
     expect(find.text('李房东'), findsOneWidget, reason: '合同要点里有房东');
 
@@ -5550,10 +5675,7 @@ void groupWidgets() {
     await tester.pumpWidget(
       ChangeNotifierProvider<Repository>.value(
         value: repository,
-        child: MaterialApp(
-          theme: ZTheme.light(),
-          home: const HistoryPage(),
-        ),
+        child: MaterialApp(theme: ZTheme.light(), home: const HistoryPage()),
       ),
     );
     await tester.pumpAndSettle();
@@ -5651,7 +5773,11 @@ void groupWidgets() {
     // 纠纷中：只留维权与退租
     await pumpDetail('p3');
     expect(find.text('押金纠纷 · 维权中'), findsOneWidget, reason: '顶上要有状态卡');
-    expect(find.textContaining('扣了 2000 没给照片'), findsWidgets, reason: '纠纷原因摆出来');
+    expect(
+      find.textContaining('扣了 2000 没给照片'),
+      findsWidgets,
+      reason: '纠纷原因摆出来',
+    );
     expect(find.text('维权要做的事'), findsOneWidget);
     expect(find.text('去维权'), findsOneWidget);
     expect(find.text('退租'), findsOneWidget);
@@ -5680,9 +5806,7 @@ void groupWidgets() {
               : ThemeMode.light,
           // 故意不用 const：让这两块跟着主题重建
           home: const Scaffold(
-            body: Column(
-              children: [ZMissingPhoto(), ZHistoryCover()],
-            ),
+            body: Column(children: [ZMissingPhoto(), ZHistoryCover()]),
           ),
         ),
       );
@@ -5698,9 +5822,7 @@ void groupWidgets() {
 
     await pump(Brightness.light);
     expect(
-      Theme.of(
-        tester.element(find.byType(ZMissingPhoto)),
-      ).brightness,
+      Theme.of(tester.element(find.byType(ZMissingPhoto))).brightness,
       Brightness.light,
     );
     expect(assetOf(ZMissingPhoto), ZMissingPhoto.asset);
@@ -5708,9 +5830,7 @@ void groupWidgets() {
 
     await pump(Brightness.dark);
     expect(
-      Theme.of(
-        tester.element(find.byType(ZMissingPhoto)),
-      ).brightness,
+      Theme.of(tester.element(find.byType(ZMissingPhoto))).brightness,
       Brightness.dark,
     );
     expect(
@@ -5754,17 +5874,9 @@ void groupWidgets() {
 
     ChoiceChip chipOf(String label) =>
         tester.widget<ChoiceChip>(find.widgetWithText(ChoiceChip, label));
-    expect(
-      chipOf('已缴纳').onSelected,
-      isNull,
-      reason: '已退租后不能改回已缴纳，否则房源会被拽回租住中',
-    );
+    expect(chipOf('已缴纳').onSelected, isNull, reason: '已退租后不能改回已缴纳，否则房源会被拽回租住中');
     expect(chipOf('无押金').onSelected, isNull);
-    expect(
-      chipOf('已退还').onSelected,
-      isNotNull,
-      reason: '押金继续往后走（退到手）还是要能记账',
-    );
+    expect(chipOf('已退还').onSelected, isNotNull, reason: '押金继续往后走（退到手）还是要能记账');
     expect(find.textContaining('不能再改回「已缴纳 / 无押金」'), findsOneWidget);
 
     // 真的点「已退还」也照常生效：押金能继续往前流转
@@ -5873,10 +5985,7 @@ void groupWidgets() {
     await tester.pumpWidget(
       ChangeNotifierProvider<Repository>.value(
         value: repository,
-        child: MaterialApp(
-          theme: ZTheme.light(),
-          home: const ExpensePage(),
-        ),
+        child: MaterialApp(theme: ZTheme.light(), home: const ExpensePage()),
       ),
     );
     await tester.pumpAndSettle();
@@ -5931,10 +6040,7 @@ void groupWidgets() {
     await tester.pumpWidget(
       ChangeNotifierProvider<Repository>.value(
         value: repository,
-        child: MaterialApp(
-          theme: ZTheme.light(),
-          home: const ExpensePage(),
-        ),
+        child: MaterialApp(theme: ZTheme.light(), home: const ExpensePage()),
       ),
     );
     await tester.pumpAndSettle();
@@ -5943,11 +6049,7 @@ void groupWidgets() {
     await tester.tap(find.textContaining('切换房源'));
     await tester.pumpAndSettle();
     expect(find.text('望京西园 4 区'), findsWidgets, reason: '在租的那套要列出来');
-    expect(
-      find.text('以前住的房子'),
-      findsNothing,
-      reason: '已退租 / 纠纷中的不进费用页的切换',
-    );
+    expect(find.text('以前住的房子'), findsNothing, reason: '已退租 / 纠纷中的不进费用页的切换');
   });
 
   testWidgets('费用：租金日历那行的状态标签贴着右边缘', (tester) async {
@@ -6003,10 +6105,7 @@ void groupWidgets() {
     await tester.pumpWidget(
       ChangeNotifierProvider<Repository>.value(
         value: repository,
-        child: MaterialApp(
-          theme: ZTheme.light(),
-          home: const TenancyPage(),
-        ),
+        child: MaterialApp(theme: ZTheme.light(), home: const TenancyPage()),
       ),
     );
     await tester.pumpAndSettle();
@@ -6036,10 +6135,7 @@ void groupWidgets() {
     await tester.pumpWidget(
       ChangeNotifierProvider<Repository>.value(
         value: repository,
-        child: MaterialApp(
-          theme: ZTheme.light(),
-          home: const TenancyPage(),
-        ),
+        child: MaterialApp(theme: ZTheme.light(), home: const TenancyPage()),
       ),
     );
     await tester.pumpAndSettle();
@@ -6306,11 +6402,7 @@ void groupWidgets() {
     await tester.pump(const Duration(milliseconds: 260));
 
     expect(find.text('已保存'), findsOneWidget);
-    expect(
-      find.byType(SnackBar),
-      findsNothing,
-      reason: '不该再用页面底部的 SnackBar',
-    );
+    expect(find.byType(SnackBar), findsNothing, reason: '不该再用页面底部的 SnackBar');
     expect(
       tester.getTopLeft(find.text('已保存')).dy,
       lessThan(120),
@@ -6552,125 +6644,117 @@ void groupWidgets() {
   // 运行时切深色（而不是冷启动就是深色）：`const` 出来的组件很容易被「冻」在浅色，
   // 所以「没有房源的空状态」和「有房源的正常态」各守一遍。
   for (final withData in <bool>[false, true]) {
-    testWidgets(
-      '运行时切深色：${withData ? '有房源' : '空状态'}时首页 / 费用页要当场换色',
-      (tester) async {
-        tester.view.physicalSize = const Size(390, 1400);
-        tester.view.devicePixelRatio = 1;
-        addTearDown(tester.view.reset);
-        addTearDown(() => Z.applyBrightness(Brightness.light));
+    testWidgets('运行时切深色：${withData ? '有房源' : '空状态'}时首页 / 费用页要当场换色', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(390, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      addTearDown(() => Z.applyBrightness(Brightness.light));
 
-        final repository = await openTestRepository(tester);
-        final session = Session(repository.store);
-        await tester.runAsync(() async {
-          await session.enterGuestMode();
-          if (withData) await seedSmokeData(repository);
-        });
-        final settings = ApiSettings(repository.store);
-        final cloud = CloudService(
+      final repository = await openTestRepository(tester);
+      final session = Session(repository.store);
+      await tester.runAsync(() async {
+        await session.enterGuestMode();
+        if (withData) await seedSmokeData(repository);
+      });
+      final settings = ApiSettings(repository.store);
+      final cloud = CloudService(
+        repository: repository,
+        session: session,
+        settings: settings,
+        httpClient: MockClient(
+          (request) async => _jsonResponse({'code': '00000', 'data': {}}),
+        ),
+      );
+      addTearDown(cloud.dispose);
+
+      await tester.pumpWidget(
+        ZudunApp(
           repository: repository,
           session: session,
-          settings: settings,
-          httpClient: MockClient(
-            (request) async => _jsonResponse({'code': '00000', 'data': {}}),
-          ),
-        );
-        addTearDown(cloud.dispose);
+          cloud: cloud,
+          notifications: NotificationService(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
 
-        await tester.pumpWidget(
-          ZudunApp(
-            repository: repository,
-            session: session,
-            cloud: cloud,
-            notifications: NotificationService(),
-          ),
-        );
-        await tester.pumpAndSettle();
-        expect(tester.takeException(), isNull);
+      // 前提：浅色下确实能查到白底卡片，否则这个用例什么也没测到
+      expect(
+        lightSurfaceOffenders(tester),
+        isNotEmpty,
+        reason: '浅色下的白底卡片应该被审计抓到',
+      );
 
-        // 前提：浅色下确实能查到白底卡片，否则这个用例什么也没测到
+      // 真实路径：外观设置一改就要整棵树重画，而不是等下次冷启动
+      await tester.runAsync(() async {
+        await repository.updateSettings(
+          repository.settings.copyWith(appearance: AppAppearance.dark),
+        );
+      });
+      await tester.pumpAndSettle();
+
+      // 首页 / 费用页都在 AppShell 的 IndexedStack 里，审计会一起看
+      expect(
+        lightSurfaceOffenders(tester),
+        isEmpty,
+        reason: '切到深色后，首页 / 费用页不该再留下浅色块',
+      );
+
+      // 空状态的区块标题也得换色：用户报的「颜色和背景差不多、看不清」就是
+      // 标题停在深墨色、压在已经变深的底上
+      if (!withData) {
         expect(
-          lightSurfaceOffenders(tester),
-          isNotEmpty,
-          reason: '浅色下的白底卡片应该被审计抓到',
+          tester.widget<Text>(find.text('租盾能帮你做什么')).style?.color,
+          Z.ink,
+          reason: '深色下区块标题要跟着换成浅墨色',
         );
+      }
 
-        // 真实路径：外观设置一改就要整棵树重画，而不是等下次冷启动
-        await tester.runAsync(() async {
-          await repository.updateSettings(
-            repository.settings.copyWith(appearance: AppAppearance.dark),
+      // ListView 只建可见项：滚到底再看一遍，别让没进视口的卡片漏过去
+      Future<void> scrollThrough(Type page, String label) async {
+        final scrollable = find.descendant(
+          of: find.byType(page),
+          matching: find.byType(Scrollable),
+        );
+        for (var i = 0; i < 4 && scrollable.evaluate().isNotEmpty; i++) {
+          await tester.drag(scrollable.first, const Offset(0, -500));
+          await tester.pumpAndSettle();
+          expect(
+            lightSurfaceOffenders(tester),
+            isEmpty,
+            reason: '$label 往下滚也不该有浅色块',
           );
-        });
-        await tester.pumpAndSettle();
+        }
+      }
 
-        // 首页 / 费用页都在 AppShell 的 IndexedStack 里，审计会一起看
+      await scrollThrough(HomePage, '首页');
+      // 底栏在 IndexedStack 之后，取最后一个同图标的就是「费用」这个 tab
+      await tester.tap(find.byIcon(Icons.account_balance_wallet_outlined).last);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: '切到费用页不该报错');
+      await scrollThrough(ExpensePage, '费用页');
+
+      // 再切回浅色：被冻住过的 const 子树要能原路变回去
+      await tester.runAsync(() async {
+        await repository.updateSettings(
+          repository.settings.copyWith(appearance: AppAppearance.light),
+        );
+      });
+      await tester.pumpAndSettle();
+      expect(Z.isDark, isFalse);
+      if (!withData) {
         expect(
-          lightSurfaceOffenders(tester),
-          isEmpty,
-          reason: '切到深色后，首页 / 费用页不该再留下浅色块',
+          tester
+              .widget<Text>(find.text('租盾能帮你做什么', skipOffstage: false))
+              .style
+              ?.color,
+          const Color(0xFF0E1F3D),
+          reason: '切回浅色要变回深墨色',
         );
-
-        // 空状态的区块标题也得换色：用户报的「颜色和背景差不多、看不清」就是
-        // 标题停在深墨色、压在已经变深的底上
-        if (!withData) {
-          expect(
-            tester
-                .widget<Text>(find.text('租盾能帮你做什么'))
-                .style
-                ?.color,
-            Z.ink,
-            reason: '深色下区块标题要跟着换成浅墨色',
-          );
-        }
-
-        // ListView 只建可见项：滚到底再看一遍，别让没进视口的卡片漏过去
-        Future<void> scrollThrough(Type page, String label) async {
-          final scrollable = find.descendant(
-            of: find.byType(page),
-            matching: find.byType(Scrollable),
-          );
-          for (var i = 0; i < 4 && scrollable.evaluate().isNotEmpty; i++) {
-            await tester.drag(scrollable.first, const Offset(0, -500));
-            await tester.pumpAndSettle();
-            expect(
-              lightSurfaceOffenders(tester),
-              isEmpty,
-              reason: '$label 往下滚也不该有浅色块',
-            );
-          }
-        }
-
-        await scrollThrough(HomePage, '首页');
-        // 底栏在 IndexedStack 之后，取最后一个同图标的就是「费用」这个 tab
-        await tester.tap(
-          find.byIcon(Icons.account_balance_wallet_outlined).last,
-        );
-        await tester.pumpAndSettle();
-        expect(tester.takeException(), isNull, reason: '切到费用页不该报错');
-        await scrollThrough(ExpensePage, '费用页');
-
-        // 再切回浅色：被冻住过的 const 子树要能原路变回去
-        await tester.runAsync(() async {
-          await repository.updateSettings(
-            repository.settings.copyWith(appearance: AppAppearance.light),
-          );
-        });
-        await tester.pumpAndSettle();
-        expect(Z.isDark, isFalse);
-        if (!withData) {
-          expect(
-            tester
-                .widget<Text>(
-                  find.text('租盾能帮你做什么', skipOffstage: false),
-                )
-                .style
-                ?.color,
-            const Color(0xFF0E1F3D),
-            reason: '切回浅色要变回深墨色',
-          );
-        }
-      },
-    );
+      }
+    });
   }
 
   testWidgets('深色审计本身有效：白底大色块一定会被抓出来', (tester) async {
@@ -6969,11 +7053,7 @@ void groupWidgets() {
         .toList();
     expect(readingFields, isNotEmpty);
     for (final field in readingFields) {
-      expect(
-        field.controller?.text,
-        isEmpty,
-        reason: '本月没有记录时，本月读数应该是空的',
-      );
+      expect(field.controller?.text, isEmpty, reason: '本月没有记录时，本月读数应该是空的');
     }
 
     // 手填本月读数：用量与费用跟着算（1300 − 1200 = 100 kWh）
@@ -7059,11 +7139,7 @@ void groupWidgets() {
     final prev = records.firstWhere((r) => r.month == prevMonth);
     final current = records.firstWhere((r) => r.month == thisMonth);
     expect(prev.electricity?.reading, 1250);
-    expect(
-      current.electricity?.reading,
-      1300,
-      reason: '本月的记录必须原样不动',
-    );
+    expect(current.electricity?.reading, 1300, reason: '本月的记录必须原样不动');
   });
 
   testWidgets('抄表录入：之前没抄过时，拿合同里入住时的表底数当基准', (tester) async {
@@ -7254,9 +7330,7 @@ void groupWidgets() {
     await tester.runAsync(() async {
       final base = buildProperty();
       await repository.addProperty(
-        base.copyWith(
-          contract: base.contract.copyWith(hasGasMeter: true),
-        ),
+        base.copyWith(contract: base.contract.copyWith(hasGasMeter: true)),
       );
     });
 
@@ -7273,22 +7347,16 @@ void groupWidgets() {
     expect(tester.takeException(), isNull);
 
     // 燃气那一项默认开着（合同里勾了有燃气表），并且页顶提示把它一起算上
-    expect(
-      find.text('合同里暂时还没有填写入住前的水/电/燃气表数，请录入'),
-      findsOneWidget,
-    );
-    expect(
-      find.text('入住抄表数'),
-      findsWidgets,
-      reason: '首月这格叫「入住抄表数」，不叫「上月读数」',
-    );
+    expect(find.text('合同里暂时还没有填写入住前的水/电/燃气表数，请录入'), findsOneWidget);
+    expect(find.text('入住抄表数'), findsWidgets, reason: '首月这格叫「入住抄表数」，不叫「上月读数」');
     expect(find.text('上月读数'), findsNothing, reason: '这套房还没有上一月');
     expect(find.text('未启用，打开开关即可记录该项读数'), findsNothing);
 
     Finder prevField(int index) => find
         .byWidgetPredicate(
           (widget) =>
-              widget is TextField && const ['上月读数', '入住抄表数'].contains(widget.decoration?.labelText),
+              widget is TextField &&
+              const ['上月读数', '入住抄表数'].contains(widget.decoration?.labelText),
         )
         .at(index);
     await tester.enterText(prevField(0), '1200');
@@ -7365,18 +7433,15 @@ void groupWidgets() {
     Finder prevField(int index) => find
         .byWidgetPredicate(
           (widget) =>
-              widget is TextField && const ['上月读数', '入住抄表数'].contains(widget.decoration?.labelText),
+              widget is TextField &&
+              const ['上月读数', '入住抄表数'].contains(widget.decoration?.labelText),
         )
         .at(index);
 
     // 值填在表卡的输入框里：填了电表，提示还得留着催水表
     await tester.enterText(prevField(0), '1200');
     await tester.pumpAndSettle();
-    expect(
-      find.textContaining('请录入'),
-      findsOneWidget,
-      reason: '水表还没填，提示不能消失',
-    );
+    expect(find.textContaining('请录入'), findsOneWidget, reason: '水表还没填，提示不能消失');
     await tester.enterText(prevField(1), '88');
     await tester.pumpAndSettle();
     expect(find.textContaining('请录入'), findsNothing, reason: '两项都填了，提示自己收掉');
@@ -7457,8 +7522,7 @@ void groupWidgets() {
     expect(find.text('1000'), findsWidgets);
     expect(
       find.byWidgetPredicate(
-        (widget) =>
-            widget is TextField && widget.decoration?.labelText == '电表',
+        (widget) => widget is TextField && widget.decoration?.labelText == '电表',
       ),
       findsNothing,
       reason: '电表已经有基准了，不该再被弹框问一次',
@@ -7535,7 +7599,8 @@ void groupWidgets() {
     expect(
       prevTexts.first,
       isEmpty,
-      reason: '电表没有更早的读数：入住表底数（3 月的数）不能顶上，'
+      reason:
+          '电表没有更早的读数：入住表底数（3 月的数）不能顶上，'
           '不然 3~8 月的用量会被算成 8 月一个月',
     );
     // 中间已经有记录：这里缺的是「上月读数」，不是入住表底数
@@ -7551,7 +7616,8 @@ void groupWidgets() {
       find
           .byWidgetPredicate(
             (widget) =>
-                widget is TextField && const ['上月读数', '入住抄表数'].contains(widget.decoration?.labelText),
+                widget is TextField &&
+                const ['上月读数', '入住抄表数'].contains(widget.decoration?.labelText),
           )
           .first,
       '1500',
@@ -7691,10 +7757,7 @@ void groupWidgets() {
       (widget) => widget is TextField && widget.decoration?.labelText == label,
     );
     // 编辑已有房源时，已经抄过的那项要带出来，不会显示成 0
-    expect(
-      tester.widget<TextField>(field('电表')).controller?.text,
-      '1200',
-    );
+    expect(tester.widget<TextField>(field('电表')).controller?.text, '1200');
     expect(tester.widget<TextField>(field('水表')).controller?.text, isEmpty);
     // 默认「没有燃气表」：燃气表读数框不该出现
     expect(find.text('没有燃气表'), findsWidgets);
@@ -7804,8 +7867,7 @@ void groupWidgets() {
     // 两边都动了：向导里填 1300，合同页那边改成 1500
     await tester.enterText(
       find.byWidgetPredicate(
-        (widget) =>
-            widget is TextField && widget.decoration?.labelText == '电表',
+        (widget) => widget is TextField && widget.decoration?.labelText == '电表',
       ),
       '1300',
     );
@@ -7998,7 +8060,10 @@ void groupWidgets() {
     await tester.pumpAndSettle();
     expect(find.text('确认提示'), findsNothing);
     expect(find.text('请先阅读并同意协议'), findsNothing, reason: '同意后放行');
-    expect(repository.store.getString(kPrivacyConsentKey), zudunProtocolVersion);
+    expect(
+      repository.store.getString(kPrivacyConsentKey),
+      zudunProtocolVersion,
+    );
   });
 
   testWidgets('登录页：渲染正常且未同意隐私说明时不提交', (tester) async {
@@ -8027,10 +8092,7 @@ void groupWidgets() {
           ChangeNotifierProvider<CloudService>.value(value: cloud),
           Provider<ApiSettings>.value(value: settings),
         ],
-        child: MaterialApp(
-          theme: ZTheme.light(),
-          home: const LoginPage(),
-        ),
+        child: MaterialApp(theme: ZTheme.light(), home: const LoginPage()),
       ),
     );
     await tester.pumpAndSettle();
@@ -8138,10 +8200,7 @@ void groupWidgets() {
           ChangeNotifierProvider<CloudService>.value(value: cloud),
           Provider<ApiSettings>.value(value: settings),
         ],
-        child: MaterialApp(
-          theme: ZTheme.light(),
-          home: const AboutPage(),
-        ),
+        child: MaterialApp(theme: ZTheme.light(), home: const AboutPage()),
       ),
     );
     await tester.pumpAndSettle();
@@ -8288,65 +8347,189 @@ void groupWidgets() {
     expect(find.text('卫生间漏水'), findsOneWidget);
   });
 
-
-    test('版本号比较与更新配置解析', () {
-      expect(compareVersions('1.2.0', '1.1.9'), greaterThan(0));
-      expect(compareVersions('1.0.1', '1.0.1'), 0);
-      expect(compareVersions('1.1', '1.1.0'), 0);
-      final fromString = parseAppUpdate(
-        jsonEncode({
-          'version': '1.2.0',
-          'notes': '修复若干问题',
-          'downloadUrl': 'https://a/b.apk',
-        }),
-      );
-      expect(fromString?.version, '1.2.0');
-      expect(fromString?.url, 'https://a/b.apk');
-      final wrapped = parseAppUpdate({
-        'paramValue': jsonEncode({'latestVersion': '2.0.0', 'forceUpdate': 1}),
-      });
-      expect(wrapped?.version, '2.0.0');
-      expect(wrapped?.force, isTrue);
-      expect(parseAppUpdate({'notes': '空配置'}), isNull);
-      expect(parseAppUpdate(null), isNull);
+  test('版本号比较与更新配置解析', () {
+    expect(compareVersions('1.2.0', '1.1.9'), greaterThan(0));
+    expect(compareVersions('1.0.1', '1.0.1'), 0);
+    expect(compareVersions('1.1', '1.1.0'), 0);
+    final fromString = parseAppUpdate(
+      jsonEncode({
+        'version': '1.2.0',
+        'notes': '修复若干问题',
+        'downloadUrl': 'https://a/b.apk',
+      }),
+    );
+    expect(fromString?.version, '1.2.0');
+    expect(fromString?.url, 'https://a/b.apk');
+    final wrapped = parseAppUpdate({
+      'paramValue': jsonEncode({'latestVersion': '2.0.0', 'forceUpdate': 1}),
     });
+    expect(wrapped?.version, '2.0.0');
+    expect(wrapped?.force, isTrue);
+    expect(parseAppUpdate({'notes': '空配置'}), isNull);
+    expect(parseAppUpdate(null), isNull);
 
-    testWidgets('版本更新弹窗：显示新版本并可关闭，同版本不弹', (WidgetTester tester) async {
-      tester.view.physicalSize = const Size(390, 900);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-      Future<void> show(String version) => checkAppUpdateOnStart(
-        context: tester.element(find.text('检查更新')),
-        rawConfig: jsonEncode({'version': version, 'notes': '新增隐私确认页'}),
-        currentVersion: '1.0.1',
-        onConsumed: () {},
+    // 平台后台实际下发的那套按平台分字段的写法
+    const serverPayload = {
+      'iosAppVersion': '1.0.2',
+      'iosAppDownloadUrl': 'https://apps.apple.com/app/id1234567890',
+      'iosUpdateType': 1,
+      'androidVersion': '1.0.1',
+      'androidUpdateType': 0,
+    };
+    final ios = parseAppUpdate(serverPayload, platform: TargetPlatform.iOS);
+    expect(ios?.version, '1.0.2', reason: 'iOS 读 iosAppVersion');
+    expect(ios?.url, 'https://apps.apple.com/app/id1234567890');
+    expect(ios?.force, isFalse, reason: 'updateType=1 是提示更新，能稍后再说');
+    expect(ios?.blocking, isFalse);
+    final android = parseAppUpdate(
+      serverPayload,
+      platform: TargetPlatform.android,
+    );
+    expect(android?.version, '1.0.1', reason: 'Android 读 androidVersion');
+    expect(android?.url, '', reason: '没下发 android 下载地址就留空');
+    expect(
+      parseAppUpdate({
+        ...serverPayload,
+        'iosUpdateType': 2,
+      }, platform: TargetPlatform.iOS)?.force,
+      isTrue,
+      reason: 'updateType=2 才算强制更新',
+    );
+
+    // 后台还填着占位链接时：当「没有下载地址」处理，
+    // 弹窗就不摆「立即更新」，不会把用户送去百度
+    final placeholder = parseAppUpdate({
+      ...serverPayload,
+      'iosAppDownloadUrl': '',
+      'iosUpdateType': 2,
+    }, platform: TargetPlatform.iOS);
+    expect(placeholder?.url, '', reason: '占位域名当没填');
+    expect(placeholder?.force, isTrue, reason: '强制标记本身还是要认');
+    expect(placeholder?.blocking, isFalse, reason: '强制但没有下载地址不能把用户锁死：既装不上也回不去');
+  });
+
+  testWidgets('版本更新弹窗：显示新版本并可关闭，同版本不弹', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(390, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    // 没有更高版本就什么都不弹（弹窗只负责展示，判断在调用方）
+    Future<void> show(String version) async {
+      final info = newerUpdate(
+        jsonEncode({'version': version, 'notes': '新增隐私确认页'}),
+        '1.0.1',
       );
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: ZTheme.light(),
-          home: Builder(
-            builder: (context) => Scaffold(
-              body: Center(
-                child: TextButton(
-                  onPressed: () => show('9.9.9'),
-                  child: const Text('检查更新'),
-                ),
+      if (info == null) return;
+      await showAppUpdateDialog(
+        context: tester.element(find.text('检查更新')),
+        info: info,
+        currentVersion: '1.0.1',
+      );
+    }
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ZTheme.light(),
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: Center(
+              child: TextButton(
+                onPressed: () => show('9.9.9'),
+                child: const Text('检查更新'),
               ),
             ),
           ),
         ),
-      );
-      await tester.tap(find.text('检查更新'));
-      await tester.pumpAndSettle();
-      expect(find.text('发现新版本 v9.9.9'), findsOneWidget);
-      expect(find.text('新增隐私确认页'), findsOneWidget);
-      await tester.tap(find.text('稍后再说'));
-      await tester.pumpAndSettle();
-      expect(find.text('发现新版本 v9.9.9'), findsNothing);
+      ),
+    );
+    await tester.tap(find.text('检查更新'));
+    await tester.pumpAndSettle();
+    expect(find.text('发现新版本 v9.9.9'), findsOneWidget);
+    expect(find.text('新增隐私确认页'), findsOneWidget);
+    await tester.tap(find.text('稍后再说'));
+    await tester.pumpAndSettle();
+    expect(find.text('发现新版本 v9.9.9'), findsNothing);
 
-      // 同一个版本不再弹
-      await show('1.0.1');
-      await tester.pumpAndSettle();
-      expect(find.textContaining('发现新版本'), findsNothing);
-    });
+    // 同一个版本不再弹
+    await show('1.0.1');
+    await tester.pumpAndSettle();
+    expect(find.textContaining('发现新版本'), findsNothing);
+  });
+
+  testWidgets('更新弹窗：强制更新 + 有下载地址才锁住用户', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(390, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    const info = AppUpdateInfo(
+      version: '9.9.9',
+      url: 'https://apps.apple.com/app/id1234567890',
+      force: true,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ZTheme.light(),
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: Center(
+              child: TextButton(
+                onPressed: () => showAppUpdateDialog(
+                  context: context,
+                  info: info,
+                  currentVersion: '1.0.1',
+                ),
+                child: const Text('检查更新'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('检查更新'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('发现新版本 v9.9.9'), findsOneWidget);
+    expect(find.text('立即更新'), findsOneWidget);
+    expect(find.textContaining('https://'), findsNothing, reason: '弹窗不显示下载地址');
+    expect(find.text('稍后再说'), findsNothing, reason: '强制更新不给稍后再说');
+    await tester.tapAt(const Offset(6, 6)); // 点遮罩
+    await tester.pumpAndSettle();
+    expect(find.text('发现新版本 v9.9.9'), findsOneWidget, reason: '强制更新点遮罩也关不掉');
+  });
+
+  testWidgets('更新弹窗：强制更新但没有下载地址时留退路', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(390, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    // 后台填的占位地址会被解析成「没有地址」，就是这种形态
+    const info = AppUpdateInfo(version: '9.9.9', force: true);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ZTheme.light(),
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: Center(
+              child: TextButton(
+                onPressed: () => showAppUpdateDialog(
+                  context: context,
+                  info: info,
+                  currentVersion: '1.0.1',
+                ),
+                child: const Text('检查更新'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('检查更新'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('发现新版本 v9.9.9'), findsOneWidget);
+    expect(find.text('立即更新'), findsNothing, reason: '没地址就不摆这个按钮');
+    expect(find.text('稍后再说'), findsOneWidget, reason: '既装不上新版，就得让用户回得去');
+    await tester.tap(find.text('稍后再说'));
+    await tester.pumpAndSettle();
+    expect(find.text('发现新版本 v9.9.9'), findsNothing);
+  });
 }

@@ -33,17 +33,11 @@ class AppUpdateDialog extends StatelessWidget {
               style: ZText.body.copyWith(fontSize: 13, height: 1.6),
             ),
           ],
-          if (info.url.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            SelectableText(
-              info.url,
-              style: ZText.monoSmall.copyWith(color: Z.ink3),
-            ),
-          ],
         ],
       ),
       actions: [
-        if (!info.force)
+        // 锁死用户的前提是「点得到立即更新」；没有下载地址时必须留退路
+        if (!info.blocking)
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: Text('稍后再说', style: TextStyle(color: Z.ink3)),
@@ -80,27 +74,16 @@ class AppUpdateDialog extends StatelessWidget {
   }
 }
 
-/// 启动时静默检查版本更新，有更高版本就弹一次升级框；
-/// 检查失败或没有新版都不打扰用户。
-Future<void> checkAppUpdateOnStart({
+/// 弹一次升级框。调用方负责判断「确实有更高版本」，
+/// 所以这里只管展示与「立即更新 / 稍后再说」的交互。
+Future<void> showAppUpdateDialog({
   required BuildContext context,
-  required Object? rawConfig,
+  required AppUpdateInfo info,
   required String currentVersion,
-  required void Function() onConsumed,
 }) async {
-  final info = parseAppUpdate(rawConfig);
-  if (info == null || compareVersions(info.version, currentVersion) <= 0) {
-    onConsumed();
-    return;
-  }
-  if (!context.mounted) {
-    onConsumed();
-    return;
-  }
   await showDialog<void>(
     context: context,
-    barrierDismissible: !info.force,
+    barrierDismissible: !info.blocking,
     builder: (_) => AppUpdateDialog(info: info, currentVersion: currentVersion),
   );
-  onConsumed();
 }

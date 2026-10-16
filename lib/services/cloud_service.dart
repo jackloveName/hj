@@ -137,7 +137,8 @@ class CloudService extends ChangeNotifier implements CloudBridge {
     await pull();
   }
 
-  Future<void> sendLoginCode(String mobile) => auth.sendLoginCode(mobile: mobile);
+  Future<void> sendLoginCode(String mobile) =>
+      auth.sendLoginCode(mobile: mobile);
 
   /// 登录：验证码或密码
   Future<void> signIn({
@@ -251,7 +252,7 @@ class CloudService extends ChangeNotifier implements CloudBridge {
     await config.saveUserConfig(
       paramKey: session.dataKey,
       paramValue: 'null',
-      remark: '租盾数据（账号注销前清理）',
+      remark: '哆米记账数据（账号注销前清理）',
     );
     await profile.destroyUser();
     // 服务端删除成功后再清本机：账号数据、云端照片缓存、登录态
@@ -266,7 +267,9 @@ class CloudService extends ChangeNotifier implements CloudBridge {
     if (scope == Session.guestScope) return;
     // 先删照片文件（本机的直接删，云端的清缓存并请求一起删除），再删数据本体；
     // 反过来的话数据一没，这些文件就再也没人引用了
-    await repository.purgeLocalMedia(keep: _mediaRefsOf(Repository.guestDataKey));
+    await repository.purgeLocalMedia(
+      keep: _mediaRefsOf(Repository.guestDataKey),
+    );
     // 本机账号数据键是 `zudun.data.v1.<scope>`（见 _useScopeOf）：
     // 用云端键 Session.dataKeyOf 去删本机数据只会删到一个不存在的键，
     // 账号数据会留在本机（重新登录还会被推回云端）。
@@ -322,7 +325,7 @@ class CloudService extends ChangeNotifier implements CloudBridge {
       await config.saveUserConfig(
         paramKey: session.dataKey,
         paramValue: repository.cloudJson(),
-        remark: '租盾数据',
+        remark: '哆米记账数据',
       );
       // 数据确实进了云端之后，本机这份原图才可以删（本机只留浏览缓存）
       await repository.releaseLocalMedia();
@@ -376,8 +379,7 @@ class CloudService extends ChangeNotifier implements CloudBridge {
     final raw = await config.readUserConfig(session.dataKey);
     final isEmpty =
         raw == null ||
-        (raw is String &&
-            const ['', 'null', '{}', '[]'].contains(raw.trim()));
+        (raw is String && const ['', 'null', '{}', '[]'].contains(raw.trim()));
     if (isEmpty) {
       _remoteBroken = false;
       return null;

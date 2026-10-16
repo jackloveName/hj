@@ -13,7 +13,7 @@ class ApiSettings {
       'https://mizhenhl.oss-cn-beijing.aliyuncs.com';
 
   /// 登录时提交的应用标识
-  static const String appBrand = '租盾';
+  static const String appBrand = '哆米记账';
 
   /// 登录密码传输加密密钥（与平台前端一致）
   static const String passwordSecret = '-mall--password-';
@@ -26,7 +26,8 @@ class ApiSettings {
 
   final LocalStore _store;
 
-  String get baseUrl => _nonEmpty(_store.getString(_baseUrlKey)) ?? defaultBaseUrl;
+  String get baseUrl =>
+      _nonEmpty(_store.getString(_baseUrlKey)) ?? defaultBaseUrl;
 
   String get ossBaseUrl =>
       _nonEmpty(_store.getString(_ossBaseKey)) ?? defaultOssBaseUrl;
@@ -51,7 +52,9 @@ class ApiSettings {
   static String? _normalizeUrl(String value) {
     final trimmed = value.trim();
     if (trimmed.isEmpty) return null;
-    final withScheme = trimmed.startsWith('http') ? trimmed : 'https://$trimmed';
+    final withScheme = trimmed.startsWith('http')
+        ? trimmed
+        : 'https://$trimmed';
     final uri = Uri.tryParse(withScheme);
     if (uri == null || uri.host.isEmpty) return null;
     // 去掉结尾的斜杠，方便直接拼 path

@@ -3,7 +3,6 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 
-import 'app_info.dart';
 import 'data/repository.dart';
 import 'models/models.dart';
 import 'services/api/api_settings.dart';
@@ -13,7 +12,6 @@ import 'services/protocol_service.dart';
 import 'services/session.dart';
 import 'theme/app_theme.dart';
 import 'theme/tokens.dart';
-import 'ui/app_update_dialog.dart';
 import 'ui/auth/login_page.dart';
 import 'ui/privacy_gate.dart';
 import 'ui/shell.dart';
@@ -34,7 +32,6 @@ class ZudunApp extends StatelessWidget {
   /// 系统通知服务（浏览器不支持时它自己会降级成「只发应用内提醒」）
   final NotificationService notifications;
 
-
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
@@ -43,49 +40,47 @@ class ZudunApp extends StatelessWidget {
         ChangeNotifierProvider<Session>.value(value: session),
         ChangeNotifierProvider<CloudService>.value(value: cloud),
         Provider<ApiSettings>.value(value: cloud.settings),
-        ChangeNotifierProvider<NotificationService>.value(
-          value: notifications,
-        ),
+        ChangeNotifierProvider<NotificationService>.value(value: notifications),
       ],
       child: _AppearanceWatcher(
         repository: repository,
         child: Consumer<Repository>(
-        builder: (context, repository, _) {
-          // 关键：令牌的明暗必须在建树**之前**定好。
-          // 放在 MaterialApp 的 builder 里会因为「页面比它先重建」而读到旧值，
-          // 表现就是切了深色还有些卡片 / 底栏没跟着变。
-          Z.applyBrightness(_effectiveBrightness(repository));
-          return MaterialApp(
-          title: '租盾',
-          debugShowCheckedModeBanner: false,
-          theme: ZTheme.light(),
-          darkTheme: ZTheme.dark(),
-          // 外观偏好由「我的」页的开关与「设置 → 常规 → 外观」决定
-          themeMode: _themeModeOf(repository.settings.appearance),
-          locale: const Locale('zh', 'CN'),
-          scrollBehavior: const ZScrollBehavior(),
-          supportedLocales: const [Locale('zh', 'CN'), Locale('en', 'US')],
-          localizationsDelegates: const [
-            GlobalMaterialLocalizations.delegate,
-            GlobalWidgetsLocalizations.delegate,
-            GlobalCupertinoLocalizations.delegate,
-          ],
-          builder: (context, child) {
-            // 这里读到的 Theme 是 MaterialApp 之外的「环境主题」，
-            // 并不是 themeMode 解析出来的那一套，拿它判断明暗会一直是浅色。
-            // 令牌已经在上面按设置算好了，这里只管文字缩放。
-            final media = MediaQuery.of(context);
-            return MediaQuery(
-              data: media.copyWith(
-                textScaler: media.textScaler.clamp(maxScaleFactor: 1.2),
-              ),
-              child: child ?? const SizedBox.shrink(),
+          builder: (context, repository, _) {
+            // 关键：令牌的明暗必须在建树**之前**定好。
+            // 放在 MaterialApp 的 builder 里会因为「页面比它先重建」而读到旧值，
+            // 表现就是切了深色还有些卡片 / 底栏没跟着变。
+            Z.applyBrightness(_effectiveBrightness(repository));
+            return MaterialApp(
+              title: '租盾',
+              debugShowCheckedModeBanner: false,
+              theme: ZTheme.light(),
+              darkTheme: ZTheme.dark(),
+              // 外观偏好由「我的」页的开关与「设置 → 常规 → 外观」决定
+              themeMode: _themeModeOf(repository.settings.appearance),
+              locale: const Locale('zh', 'CN'),
+              scrollBehavior: const ZScrollBehavior(),
+              supportedLocales: const [Locale('zh', 'CN'), Locale('en', 'US')],
+              localizationsDelegates: const [
+                GlobalMaterialLocalizations.delegate,
+                GlobalWidgetsLocalizations.delegate,
+                GlobalCupertinoLocalizations.delegate,
+              ],
+              builder: (context, child) {
+                // 这里读到的 Theme 是 MaterialApp 之外的「环境主题」，
+                // 并不是 themeMode 解析出来的那一套，拿它判断明暗会一直是浅色。
+                // 令牌已经在上面按设置算好了，这里只管文字缩放。
+                final media = MediaQuery.of(context);
+                return MediaQuery(
+                  data: media.copyWith(
+                    textScaler: media.textScaler.clamp(maxScaleFactor: 1.2),
+                  ),
+                  child: child ?? const SizedBox.shrink(),
+                );
+              },
+              home: const _StartupGate(),
             );
           },
-          home: const _StartupGate(),
-          );
-        },
-      ),
+        ),
       ),
     );
   }
@@ -200,8 +195,6 @@ class _StartupGate extends StatefulWidget {
 }
 
 class _StartupGateState extends State<_StartupGate> {
-  bool _updateChecked = false;
-
   /// 还没同意协议：整屏挡住，只有同意才进得去
   bool _consentMissing = false;
 
@@ -211,8 +204,6 @@ class _StartupGateState extends State<_StartupGate> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       // 首次启动（或协议版本更新后）先征询同意：对齐应用市场合规要求
       await _askConsent();
-      if (!mounted) return;
-      await _checkUpdate();
     });
   }
 
@@ -231,25 +222,6 @@ class _StartupGateState extends State<_StartupGate> {
     await ensurePrivacyConsent(context);
     if (!mounted) return;
     if (agreed()) setState(() => _consentMissing = false);
-  }
-
-  /// 启动时静默检查版本更新：请求失败、没有新版都安静放过
-  Future<void> _checkUpdate() async {
-    if (_updateChecked) return;
-    _updateChecked = true;
-    final cloud = context.read<CloudService>();
-    try {
-      final raw = await cloud.config.readSystemConfig(ApiSettings.appBrand);
-      if (!mounted) return;
-      await checkAppUpdateOnStart(
-        context: context,
-        rawConfig: raw,
-        currentVersion: kAppVersion,
-        onConsumed: () {},
-      );
-    } catch (_) {
-      // 后台检查失败不打扰用户
-    }
   }
 
   @override
