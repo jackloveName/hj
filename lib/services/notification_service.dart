@@ -133,9 +133,10 @@ class NotificationService extends ChangeNotifier {
 
   /// 直接弹一条，用来验证「系统通知到底通不通」。
   ///
-  /// 返回给界面提示的文案：成功了说去哪儿看，没成功说明为什么
-  /// —— 以前这里失败是静默 return，用户按了以为按钮坏了。
-  Future<String> showTest() async {
+  /// 发不出去时返回一句人话说明为什么，界面照原样提示；**发成功返回 null**，
+  /// 界面不该再补一句「已发一条测试通知」——通知栏里那条本身就是反馈，
+  /// 多一句弹窗只是噪音。以前这里失败是静默 return，用户按了以为按钮坏了。
+  Future<String?> showTest() async {
     if (!await ensureReady()) {
       return isWeb
           ? '当前浏览器不支持系统通知（需要 HTTPS 且浏览器允许通知）；'
@@ -158,8 +159,9 @@ class NotificationService extends ChangeNotifier {
       notifyListeners();
       return '发送失败：$error';
     }
-    // 复核一下系统到底收没收到（安卓能查「当前展示中的通知」）
-    return await _channel.verify(id) ?? '已发一条测试通知：下拉通知栏看看';
+    // 复核一下系统到底收没收到（安卓能查「当前展示中的通知」）：
+    // 一切正常就返回 null，什么也不说
+    return await _channel.verify(id);
   }
 
   /// 去系统设置里开通知（被拒绝后给用户一个直达入口）

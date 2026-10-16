@@ -11,7 +11,9 @@ Future<void> showServerAddressDialog(
   required ApiSettings settings,
   required CloudService cloud,
 }) async {
-  final controller = TextEditingController(text: settings.baseUrl);
+  // 和别处一样：不在弹窗里用 TextEditingController（退场动画期间 dispose
+  // 会让输入框重建时红屏），初值走 initialValue，输入用局部变量收
+  var typed = settings.baseUrl;
   final value = await showDialog<String>(
     context: context,
     builder: (ctx) => AlertDialog(
@@ -20,14 +22,15 @@ Future<void> showServerAddressDialog(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          TextField(
-            controller: controller,
+          TextFormField(
+            initialValue: settings.baseUrl,
             autofocus: true,
             keyboardType: TextInputType.url,
             decoration: const InputDecoration(
               labelText: '网关地址',
               hintText: ApiSettings.defaultBaseUrl,
             ),
+            onChanged: (text) => typed = text,
           ),
           const SizedBox(height: 8),
           Text('留空或填写错误会回到默认网关。', style: ZText.caption),
@@ -43,13 +46,12 @@ Future<void> showServerAddressDialog(
           child: Text('取消', style: TextStyle(color: Z.ink3)),
         ),
         FilledButton(
-          onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+          onPressed: () => Navigator.of(ctx).pop(typed.trim()),
           child: const Text('保存'),
         ),
       ],
     ),
   );
-  controller.dispose();
   if (value == null || !context.mounted) return;
 
   if (value == 'reset') {

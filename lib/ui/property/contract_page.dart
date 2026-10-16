@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -24,6 +26,12 @@ class ContractPage extends StatelessWidget {
       return const ZScreen(child: SizedBox.shrink());
     }
     final contract = property.contract;
+    // 没燃气表的房子不把燃气算进「待补」，不然这条提示永远消不掉
+    final missingReadings = missingMoveInReadings(
+      contract,
+      repository.utilitiesOf(property.id),
+      property.id,
+    );
     final missing = <String>[
       if (contract.earlyTermination.isEmpty) '提前退租条件',
       if (contract.renewalTerms.isEmpty) '续租条款',
@@ -31,7 +39,10 @@ class ContractPage extends StatelessWidget {
     ];
 
     return ZScreen(
-      bottomBar: _BottomBar(property: property),
+      // 已退租 / 纠纷中只读：没有「保存并生成提醒计划」这一步了
+      bottomBar: canEditProperty(property)
+          ? _BottomBar(property: property)
+          : null,
       child: Column(
         children: [
           ZAppBar(
@@ -149,6 +160,17 @@ class ContractPage extends StatelessWidget {
                       ),
                     ],
                   ),
+                ),
+                ZSectionTitle(
+                  title: '入住时的表底数',
+                  icon: Icons.speed_outlined,
+                  moreLabel: missingReadings == 0
+                      ? '已填齐'
+                      : '还有 $missingReadings 项待补',
+                ),
+                _MoveInReadings(
+                  property: property,
+                  editable: canEditProperty(property),
                 ),
                 ZSectionTitle(
                   title: '合同照片（选填）',
@@ -274,6 +296,209 @@ class ContractPage extends StatelessWidget {
   }
 }
 
+/// 入住时的三个表底数（电 / 水 / 燃气）：填完（失焦）自动存。
+///
+/// 抄表录入的首月用量拿它当基准，所以这里要能补、能改 ——
+/// 首页那条「补填入住时的水/电表数」的待办点进来就是这儿。
+///
+/// 为什么不是「边敲边存」：每敲一个字符就整份数据落盘 + 全量重建太重，
+/// 而且输入到一半的串（「1.2.3」这种）解析不出来，写进去等于把已填的值清掉。
+/// 所以攒到失焦（或退出这个页面）才写，且只写解析成功的那一项。
+class _MoveInReadings extends StatefulWidget {
+  const _MoveInReadings({required this.property, required this.editable});
+
+  final Property property;
+
+  /// 已退租 / 纠纷中的房子只读：能看，不能改
+  final bool editable;
+
+  @override
+  State<_MoveInReadings> createState() => _MoveInReadingsState();
+}
+
+class _MoveInReadingsState extends State<_MoveInReadings> {
+  late final TextEditingController _electricity;
+  late final TextEditingController _water;
+  late final TextEditingController _gas;
+  final List<FocusNode> _nodes = [FocusNode(), FocusNode(), FocusNode()];
+
+  /// 最近一次和仓库对齐的三项值：用来判断「外部改了没」和「有没有变化」
+  late (double?, double?, double?) _saved;
+  bool _dirty = false;
+  Repository? _repository;
+
+  @override
+  void initState() {
+    super.initState();
+    final contract = widget.property.contract;
+    _saved = (
+      contract.moveInElectricity,
+      contract.moveInWater,
+      contract.moveInGas,
+    );
+    _electricity = TextEditingController(text: _textOf(_saved.$1));
+    _water = TextEditingController(text: _textOf(_saved.$2));
+    _gas = TextEditingController(text: _textOf(_saved.$3));
+    // 失焦就存：三个框都走同一条路，键盘上点「完成」、点别处、
+    // 点页面底部那个按钮（默认会先让输入框失焦）都会落到这儿
+    if (widget.editable) {
+      for (final node in _nodes) {
+        node.addListener(() {
+          if (!node.hasFocus) _save();
+        });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    // 手还没离开输入框就退出页面（返回键）：把没存的补上，
+    // 不然用户填的数字会静默丢掉
+    if (widget.editable && _dirty) unawaited(_write());
+    for (final node in _nodes) {
+      node.dispose();
+    }
+    _electricity.dispose();
+    _water.dispose();
+    _gas.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _repository = context.read<Repository>();
+  }
+
+  @override
+  void didUpdateWidget(_MoveInReadings old) {
+    super.didUpdateWidget(old);
+    // 别处（云端同步、编辑房源）改过这三项时跟着刷新：
+    // 否则页面还显示旧文本，下一次落盘会用旧值把新值盖回去
+    final contract = widget.property.contract;
+    final now = (
+      contract.moveInElectricity,
+      contract.moveInWater,
+      contract.moveInGas,
+    );
+    if (now == _saved) return;
+    _saved = now;
+    _dirty = false;
+    _electricity.text = _textOf(now.$1);
+    _water.text = _textOf(now.$2);
+    _gas.text = _textOf(now.$3);
+  }
+
+  /// 没抄过就留空框，别显示成 0（0 是「表上本来就是 0」）
+  static String _textOf(double? value) => value == null ? '' : fmtAmount(value);
+
+  /// 空框 = 没抄（null），不是 0；解析不出来（输入到一半 / 填了别的字符）
+  /// 返回 [_unreadable]，交给调用方跳过这一项，别把已存的值清掉
+  static const Object _unreadable = Object();
+
+  static Object? _valueOf(TextEditingController controller) {
+    final text = controller.text.trim();
+    if (text.isEmpty) return null;
+    return double.tryParse(text) ?? _unreadable;
+  }
+
+  /// 失焦时调用：三个框的值和仓库里一致就什么都不做
+  void _save() {
+    if (!widget.editable) return;
+    final repository = _repository;
+    if (repository == null || !mounted) return;
+    final contract = repository.propertyById(widget.property.id)?.contract;
+    final current = contract == null
+        ? _saved
+        : (
+            contract.moveInElectricity,
+            contract.moveInWater,
+            contract.moveInGas,
+          );
+    final typed = (_valueOf(_electricity), _valueOf(_water), _valueOf(_gas));
+    final changed = [
+      (!identical(typed.$1, _unreadable) && typed.$1 != current.$1),
+      (!identical(typed.$2, _unreadable) && typed.$2 != current.$2),
+      (!identical(typed.$3, _unreadable) && typed.$3 != current.$3),
+    ].any((item) => item);
+    if (!changed) {
+      _dirty = false;
+      return;
+    }
+    _dirty = true;
+    unawaited(_write());
+  }
+
+  /// 真正落盘：用仓库里最新那份改（别拿 build 时捕获的旧对象覆盖别处改动），
+  /// 并且不刷新 `updatedAt` —— 补个历史资料不该让首页押金「已等待 N 天」归零，
+  /// 也不该把旧房源顶到历史列表前面去
+  Future<void> _write() async {
+    final repository = _repository;
+    if (repository == null) return;
+    // 用仓库里最新的那份，别拿 build 时捕获的旧对象覆盖别处的改动
+    final property =
+        repository.propertyById(widget.property.id) ?? widget.property;
+    final contract = property.contract;
+    final typed = (_valueOf(_electricity), _valueOf(_water), _valueOf(_gas));
+    final next = contract.copyWith(
+      moveInElectricity: identical(typed.$1, _unreadable)
+          ? contract.moveInElectricity
+          : typed.$1 as double?,
+      moveInWater: identical(typed.$2, _unreadable)
+          ? contract.moveInWater
+          : typed.$2 as double?,
+      moveInGas: identical(typed.$3, _unreadable)
+          ? contract.moveInGas
+          : typed.$3 as double?,
+    );
+    try {
+      await repository.updateProperty(
+        property.copyWith(contract: next),
+        touch: false,
+      );
+      _saved = (next.moveInElectricity, next.moveInWater, next.moveInGas);
+      _dirty = false;
+    } catch (error) {
+      // 静默失败过：用户以为存上了，退出再进才发现没有
+      if (mounted) zToast(context, '表底数没存上：$error');
+    }
+  }
+
+  Widget _field(
+    TextEditingController controller,
+    FocusNode node,
+    String label,
+  ) => Expanded(
+    child: TextField(
+      controller: controller,
+      focusNode: node,
+      readOnly: !widget.editable,
+      keyboardType: TextInputType.number,
+      onChanged: (_) => _dirty = true,
+      decoration: InputDecoration(labelText: label),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return ZCard(
+      padding: const EdgeInsets.fromLTRB(15, 12, 15, 13),
+      child: Row(
+        children: [
+          _field(_electricity, _nodes[0], '电表'),
+          const SizedBox(width: 10),
+          _field(_water, _nodes[1], '水表'),
+          // 家里没有燃气表的，不摆这个框（要改去「编辑房源 → 有燃气表吗」）
+          if (widget.property.contract.hasGasMeter) ...[
+            const SizedBox(width: 10),
+            _field(_gas, _nodes[2], '燃气表'),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _ContractPhotos extends StatelessWidget {
   const _ContractPhotos({required this.property});
 
@@ -292,11 +517,15 @@ class _ContractPhotos extends StatelessWidget {
                 ref: refs[i],
                 height: 56,
                 watermark: ['第 ${i + 1} 页'],
+                // 读不到就用固定占位图（合同照片丢失也别写成「文件缺失」）
+                fallback: const ZMissingPhoto(),
               ),
             ),
           ),
           const SizedBox(width: 7),
         ],
+        // 已退租 / 纠纷中只读：照片能看，不能再加
+        if (canEditProperty(property))
         Expanded(
           child: InkWell(
             onTap: () => _add(context),
@@ -346,12 +575,16 @@ class _BottomBar extends StatelessWidget {
         label: '保存并生成提醒计划',
         onTap: () async {
           final repository = context.read<Repository>();
-          await repository.updateProperty(property);
+          // 取仓库里最新那份：这一页上的表底数是另外写盘的，
+          // 拿 build 时捕获的快照会把刚填进去的读数盖掉
+          final latest =
+              repository.propertyById(property.id) ?? property;
+          await repository.updateProperty(latest);
           if (!context.mounted) return;
           zToast(
             context,
-            '已生成：每月 ${property.contract.rentDueDay} 号交租，'
-            '${fmtDate(property.contract.contractEnd)} 到期',
+            '已生成：每月 ${latest.contract.rentDueDay} 号交租，'
+            '${fmtDate(latest.contract.contractEnd)} 到期',
           );
         },
       ),

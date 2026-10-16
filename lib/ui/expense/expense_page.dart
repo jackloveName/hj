@@ -27,7 +27,13 @@ class _ExpensePageState extends State<ExpensePage> {
 
     final property = repository.currentProperty;
     if (property == null) {
-      return const ZScreen(child: _LedgerEmpty());
+      // 没有在租的房子：一套都没有才显示空状态；
+      // 退过租的还留着就摊开它们的押金 —— 退租之后唯一还要盯的就是这笔钱
+      return ZScreen(
+        child: repository.properties.isEmpty
+            ? const _LedgerEmpty()
+            : _DepositOverview(repository: repository),
+      );
     }
     final contract = property.contract;
     final key = monthKey(_month);
@@ -48,8 +54,12 @@ class _ExpensePageState extends State<ExpensePage> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
               children: [
-                // 多套房子时才需要切换：放在最上面，点一下换一套
-                if (repository.properties.length > 1)
+                // 多套**在租**房子时才需要切换：放在最上面，点一下换一套。
+                // 已退租 / 纠纷中的房子不进这个切换 —— 费用只跟还在租的有关
+                if (repository.properties
+                        .where((item) => item.status == PropertyStatus.active)
+                        .length >
+                    1)
                   Align(
                     alignment: Alignment.centerRight,
                     child: TextButton.icon(
@@ -212,13 +222,17 @@ class _ExpensePageState extends State<ExpensePage> {
   }
 
   Future<void> _switch(BuildContext context, Repository repository) async {
+    // 只看在租的房子：退租 / 纠纷中的不进这个列表
+    final active = repository.properties
+        .where((item) => item.status == PropertyStatus.active)
+        .toList();
     await showModalBottomSheet<void>(
       context: context,
       builder: (ctx) => SafeArea(
         child: ListView(
           shrinkWrap: true,
           children: [
-            for (final item in repository.properties)
+            for (final item in active)
               ListTile(
                 title: Text(item.name),
                 subtitle: Text(item.address),
@@ -292,6 +306,108 @@ class _ExpensePageState extends State<ExpensePage> {
 }
 
 /// 费用空状态：账本式引导，与首页/租住页的空状态在调性与构图上互不重复
+/// 没有在租的房子时，费用页改成「全部房源的押金情况」。
+///
+/// 退租之后唯一还需要盯的钱就是押金：谁还没退、扣了多少、在不在维权。
+/// 每行点进去就是那套房的「押金追踪」（状态继续往后走、补金额都在那儿）。
+class _DepositOverview extends StatelessWidget {
+  const _DepositOverview({required this.repository});
+
+  final Repository repository;
+
+  @override
+  Widget build(BuildContext context) {
+    // 最近退租的排在上面
+    final properties = [...repository.properties]
+      ..sort((a, b) => moveOutDate(b).compareTo(moveOutDate(a)));
+    final outstanding = properties.fold<double>(
+      0,
+      (sum, property) => sum + outstandingDeposit(property),
+    );
+
+    return Column(
+      children: [
+        const SizedBox(height: 6),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+            children: [
+              const ZHintBar(
+                text: '现在没有在租的房子：下面是每套房的押金情况，'
+                    '点进去看明细、改状态。',
+                icon: Icons.savings_outlined,
+              ),
+              ZSectionTitle(
+                title: '押金情况',
+                icon: Icons.savings_outlined,
+                moreLabel: '${properties.length} 套',
+              ),
+              if (outstanding > 0) ...[
+                ZCard(
+                  // 令牌里没有 warnTint：用告警色兑一点浅底，和 ZHintBar 一个做法
+                  color: Z.warn.withValues(alpha: 0.10),
+                  border: Border.all(color: Z.warnDeep.withValues(alpha: 0.25)),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.hourglass_bottom_rounded,
+                        size: 18,
+                        color: Z.warnDeep,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text('还没退到手的押金', style: ZText.label),
+                      ),
+                      Text(
+                        fmtMoney(outstanding),
+                        style: ZText.title3.copyWith(
+                          fontSize: 18,
+                          color: Z.warnDeep,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
+              ZCard(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 15,
+                  vertical: 4,
+                ),
+                child: Column(
+                  children: [
+                    for (var i = 0; i < properties.length; i++)
+                      ZListRow(
+                        icon: Icons.savings_outlined,
+                        title: properties[i].name,
+                        subtitle: depositLine(properties[i]),
+                        trailing: ZPill(
+                          label: properties[i].deposit.status.label,
+                          background: ZTag.paletteOf(
+                            properties[i].deposit.status.tone,
+                          ).$1,
+                          foreground: ZTag.paletteOf(
+                            properties[i].deposit.status.tone,
+                          ).$2,
+                        ),
+                        onTap: () => zPush(
+                          context,
+                          DepositPage(propertyId: properties[i].id),
+                        ),
+                        divider: i != properties.length - 1,
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 final class _LedgerEmpty extends StatelessWidget {
   const _LedgerEmpty();
 
@@ -979,15 +1095,21 @@ class _CalendarCard extends StatelessWidget {
                 const SizedBox(width: 6),
                 Text('$dueDay 号交租', style: ZText.labelStrong),
                 const SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    fmtMoney(amount),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: ZText.labelStrong.copyWith(color: Z.brand),
+                // 金额吃掉中间剩下的全部宽度：以前用 Flexible + Spacer，
+                // Flexible 是宽松的，没用完的那份额度留在 Spacer 右边，
+                // 把右边那个状态标签挤到离右边缘一小截的位置
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      fmtMoney(amount),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: ZText.labelStrong.copyWith(color: Z.brand),
+                    ),
                   ),
                 ),
-                const Spacer(),
+                const SizedBox(width: 6),
                 ZTag(
                   label: status?.label ?? '未生成账单',
                   tone: switch (status) {

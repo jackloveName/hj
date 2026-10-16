@@ -49,6 +49,7 @@ class ZPhoto extends StatelessWidget {
     this.overlay,
     this.child,
     this.placeholderIcon = Icons.photo_camera_back_outlined,
+    this.fallback,
   });
 
   final String? ref;
@@ -62,6 +63,12 @@ class ZPhoto extends StatelessWidget {
   final Widget? overlay;
   final Widget? child;
   final IconData placeholderIcon;
+
+  /// 没有引用、或者引用读不到文件时，用它顶上（null = 保留现有行为）。
+  ///
+  /// 封面图这类「本来就是装饰」的位置传内置底图（[ZDefaultCover]）更顺眼；
+  /// 证据照片千万别传：那里缺文件必须让人一眼看见「文件缺失」。
+  final Widget? fallback;
 
   @override
   Widget build(BuildContext context) {
@@ -85,12 +92,15 @@ class ZPhoto extends StatelessWidget {
                 ? null
                 : (boxHeight * ratio).round(),
             gaplessPlayback: true,
-            errorBuilder: (_, _, _) => _placeholder(),
+            // 解不出来的图（文件坏了）跟读不到一样，能退底图就退底图
+            errorBuilder: (_, _, _) => fallback ?? _placeholder(),
           );
         }
         if (snapshot.connectionState != ConnectionState.done) {
-          return _placeholder(showSpinner: true);
+          // 兜底图在加载期间就先顶上：封面位置不该先闪一块灰底
+          return fallback ?? _placeholder(showSpinner: true);
         }
+        if (fallback != null) return fallback!;
         // 有引用却读不到文件：明确提示「文件缺失」，避免被误认为正常照片
         return reference.isEmpty ? _placeholder() : _missingFile();
       },
@@ -182,6 +192,102 @@ class ZPhoto extends StatelessWidget {
       );
     },
   );
+}
+
+/// 「没有照片 / 照片读不到」时的固定占位图
+/// （由 `tool/generate_photo_missing.dart` 生成）。
+///
+/// 比红字「文件缺失」温和：列表里缺一张封面照不该像报错，
+/// 但也要让人一眼看出「这里本该有张图」。
+class ZMissingPhoto extends StatelessWidget {
+  const ZMissingPhoto({super.key});
+
+  static const String asset = 'assets/images/photo_missing.png';
+
+  /// 暗色版：压在深色卡片上不会发白发亮
+  static const String darkAsset = 'assets/images/photo_missing_dark.png';
+
+  /// 按当前主题挑浅色 / 暗色那张（和 ZPhoto 里那套占位渐变同一个口径）
+  static String assetFor(Brightness brightness) =>
+      brightness == Brightness.dark ? darkAsset : asset;
+
+  @override
+  Widget build(BuildContext context) =>
+      Image.asset(assetFor(Theme.of(context).brightness), fit: BoxFit.cover);
+}
+
+/// 历史租住房卡片的固定封面
+/// （由 `tool/generate_history_cover.dart` 生成）。
+///
+/// 和租住页那张夜色封面一个思路：有没有照片都显示这一张 ——
+/// 过去那段租住用黄昏收尾，也省得旧照片在列表里糊成一片。
+class ZHistoryCover extends StatelessWidget {
+  const ZHistoryCover({super.key});
+
+  static const String asset = 'assets/images/history_cover.png';
+
+  /// 暗色版：天空更沉、窗光调低
+  static const String darkAsset = 'assets/images/history_cover_dark.png';
+
+  static String assetFor(Brightness brightness) =>
+      brightness == Brightness.dark ? darkAsset : asset;
+
+  @override
+  Widget build(BuildContext context) =>
+      Image.asset(assetFor(Theme.of(context).brightness), fit: BoxFit.cover);
+}
+
+/// 内置封面底图（由 `tool/generate_property_cover.dart` 生成）。
+///
+/// 没有封面照片、或者照片文件丢了时用它顶上：「文件缺失」那种告警样式
+/// 放在头图位置太扎眼，也不像「这里本该有张图」。
+/// 默认压一层自下而上的暗角：白字压在底图上要看得清。
+class ZDefaultCover extends StatelessWidget {
+  const ZDefaultCover({
+    super.key,
+    this.watermark = const [],
+    this.overlay,
+    this.scrim = true,
+  });
+
+  static const String asset = 'assets/images/property_cover.png';
+
+  final List<String> watermark;
+  final Widget? overlay;
+
+  /// 是否压暗角。外面已经有一层暗化渐变时（房源详情的头图）可以关掉
+  final bool scrim;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Image.asset(asset, fit: BoxFit.cover),
+        if (scrim)
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.bottomCenter,
+                end: Alignment.topCenter,
+                colors: [
+                  Z.scrimNavy,
+                  Z.scrimNavy.withValues(alpha: 0.35),
+                  Colors.transparent,
+                ],
+                stops: const [0, 0.55, 1],
+              ),
+            ),
+          ),
+        if (watermark.isNotEmpty)
+          Align(
+            alignment: Alignment.bottomLeft,
+            child: ZWatermarkBar(lines: watermark),
+          ),
+        ?overlay,
+      ],
+    );
+  }
 }
 
 /// 照片底部水印条 —— 对应设计稿 .wm

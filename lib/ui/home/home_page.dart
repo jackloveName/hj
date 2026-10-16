@@ -466,7 +466,11 @@ class _HeroHeader extends StatelessWidget {
     final contract = property.contract;
     final daysToRent = daysFromToday(nextRentDue(contract.rentDueDay));
     final daysToEnd = daysFromToday(contract.contractEnd);
-    final daysIn = daysSince(contract.moveInDate);
+    // 租住结束（已退租 / 纠纷中）之后按退租日算「一共住了多少天」
+    // （含首尾，和租住回顾同一个口径）：不能让这个数跟着今天一直涨
+    final daysIn = property.status == PropertyStatus.active
+        ? daysSince(contract.moveInDate)
+        : livedDays(property);
 
     return Container(
       decoration: const BoxDecoration(gradient: Z.heroGradient),
@@ -847,7 +851,7 @@ class _RecentPhotos extends StatelessWidget {
                       onTap: () => showPhoto(
                         context,
                         photo.imageRef,
-                        title: '${photo.room} · ${photo.phase.label}',
+                        title: '${photo.phase.label}-${photo.room}',
                         caption: fmtDateTime(photo.timestamp),
                       ),
                       child: ZPhoto(ref: photo.thumbRef, height: 72),
@@ -979,8 +983,12 @@ class ReminderListPage extends StatelessWidget {
                             for (var i = 0; i < reminders.length; i++)
                               ZListRow(
                                 title: reminders[i].title,
-                                subtitle:
-                                    '${reminders[i].propertyName} · ${reminders[i].subtitle}',
+                                // 待办自己没写副标题时（例如「补填表底数」），
+                                // 只留房源名，别拖一个孤零零的「·」
+                                subtitle: reminders[i].subtitle.isEmpty
+                                    ? reminders[i].propertyName
+                                    : '${reminders[i].propertyName} · '
+                                          '${reminders[i].subtitle}',
                                 iconTile: _ReminderIcon(
                                   kind: reminders[i].kind,
                                   tone: reminders[i].tone,

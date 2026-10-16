@@ -250,7 +250,8 @@ class _TimelineCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // 第一行：类型 + 右侧状态 / 标签
+                  // 第一行：类型 + 右侧状态（沟通的标签统一放到正文下面，
+                  // 以前首个标签在这、其余标签在卡片底部，看着东一块西一块）
                   Row(
                     children: [
                       Text(
@@ -262,40 +263,46 @@ class _TimelineCard extends StatelessWidget {
                         ),
                       ),
                       const Spacer(),
-                      ZTag(
-                        label:
-                            repair?.status.label ?? (comm?.tags.first ?? '沟通'),
-                        tone: tone,
-                      ),
+                      if (repair != null)
+                        ZTag(label: repair.status.label, tone: tone)
+                      else if (comm?.isKeyPromise == true)
+                        const ZTag(label: '关键承诺', tone: ZTone.brand),
                     ],
                   ),
                   const SizedBox(height: 8),
-                  // 第二行：物品 / 记录类型（带底色）+ 描述
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      ZTag(
-                        label:
-                            repair?.item ??
-                            (comm?.isKeyPromise == true ? '关键承诺' : '文字记录'),
-                        tone: repair != null ? tone : ZTone.brand,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          repair?.description ??
-                              (comm?.content.split('\n').first ?? ''),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: ZText.body.copyWith(
-                            fontSize: 12.5,
-                            height: 1.5,
-                            color: Z.ink,
+                  // 第二行：维修是「物品 + 描述」，沟通是整段文字记录
+                  if (repair != null)
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        ZTag(label: repair.item, tone: tone),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            repair.description,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: ZText.body.copyWith(
+                              fontSize: 12.5,
+                              height: 1.5,
+                              color: Z.ink,
+                            ),
                           ),
                         ),
+                      ],
+                    )
+                  else
+                    // 以前只取第一行，多行记录等于没显示出来
+                    Text(
+                      comm?.content ?? '',
+                      maxLines: 6,
+                      overflow: TextOverflow.ellipsis,
+                      style: ZText.body.copyWith(
+                        fontSize: 12.5,
+                        height: 1.6,
+                        color: Z.ink,
                       ),
-                    ],
-                  ),
+                    ),
                   // 第三行：照片证据 / 聊天截图（有才显示）
                   if (repair != null && repair.photoRefs.isNotEmpty) ...[
                     const SizedBox(height: 10),
@@ -313,13 +320,13 @@ class _TimelineCard extends StatelessWidget {
                       size: 68,
                     ),
                   ],
-                  if (comm != null && comm.tags.length > 1) ...[
+                  if (comm != null && comm.tags.isNotEmpty) ...[
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 6,
                       runSpacing: 6,
                       children: [
-                        for (final tag in comm.tags.skip(1)) ZTag(label: tag),
+                        for (final tag in comm.tags) ZTag(label: tag),
                       ],
                     ),
                   ],

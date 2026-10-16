@@ -569,15 +569,17 @@ class _CapturePageState extends State<CapturePage> {
 
   Future<void> _onTap(Offset local, Size size) async {
     if (_tool != 'text') return;
-    final controller = TextEditingController();
+    // 同一类坑：弹窗还没退场就 dispose 控制器会让 TextField 重建时红屏，
+    // 这里只用局部变量收一下输入
+    var typed = '';
     final text = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('添加文字标注'),
         content: TextField(
-          controller: controller,
           autofocus: true,
           decoration: const InputDecoration(hintText: '如：墙面裂缝 12cm'),
+          onChanged: (value) => typed = value,
         ),
         actions: [
           TextButton(
@@ -585,13 +587,12 @@ class _CapturePageState extends State<CapturePage> {
             child: Text('取消', style: TextStyle(color: Z.ink3)),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+            onPressed: () => Navigator.of(ctx).pop(typed.trim()),
             child: const Text('确定'),
           ),
         ],
       ),
     );
-    controller.dispose();
     if (text == null || text.isEmpty) return;
     setState(() {
       _shapes.add(

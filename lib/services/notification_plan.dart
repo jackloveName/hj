@@ -12,6 +12,7 @@ class NotificationPlan {
     required this.body,
     required this.when,
     required this.propertyId,
+    required this.propertyName,
   });
 
   /// 稳定 id：同一件事每次算出来都一样，重复同步不会堆一堆通知
@@ -21,6 +22,10 @@ class NotificationPlan {
   final String body;
   final DateTime when;
   final String propertyId;
+
+  /// 房源名。设置页要按「哪套房 · 什么时候」把排期列出来，
+  /// 页面不该去拆 [body] 拿名字，所以这里存一份
+  final String propertyName;
 
   /// 点开通知后用来决定跳哪个页面
   String get payload => '$propertyId|${slot.name}';
@@ -48,7 +53,8 @@ int notificationId(String key) {
 /// - 抄表：本月提醒日已过就排到下个月，并**预排未来一年**（长期不打开 App 也能每月收到）
 /// - 交租：同样往后预排 `lookAheadMonths` 个月，避免只提醒一次
 /// - 押金：退租后每天早上提醒一次（每次同步重排，所以只会有一天一条）
-/// - 取证待办不进系统通知：它没有「到点」的概念，留在首页待办里
+/// - 取证待办、入住表底数待补不进系统通知：它们没有「到点」的概念，
+///   留在首页待办里，用户点进去顺手就做了
 List<NotificationPlan> buildNotificationPlan({
   required List<ReminderItem> reminders,
   required ReminderSettings config,
@@ -68,6 +74,7 @@ List<NotificationPlan> buildNotificationPlan({
     required String title,
     required String body,
     required String propertyId,
+    required String propertyName,
   }) {
     if (plans.length >= maxPlans) return;
     if (!when.isAfter(now)) return;
@@ -81,6 +88,7 @@ List<NotificationPlan> buildNotificationPlan({
         body: body,
         when: when,
         propertyId: propertyId,
+        propertyName: propertyName,
       ),
     );
   }
@@ -107,6 +115,7 @@ List<NotificationPlan> buildNotificationPlan({
             title: '房租还没交',
             body: '${reminder.propertyName} · ${reminder.subtitle}',
             propertyId: reminder.propertyId,
+            propertyName: reminder.propertyName,
           );
           break;
         }
@@ -122,6 +131,7 @@ List<NotificationPlan> buildNotificationPlan({
             title: '该交房租了',
             body: '${reminder.propertyName} · ${reminder.subtitle}',
             propertyId: reminder.propertyId,
+            propertyName: reminder.propertyName,
           );
           add(
             slot: PlanSlot.rentDue,
@@ -129,6 +139,7 @@ List<NotificationPlan> buildNotificationPlan({
             title: '今天该交房租了',
             body: '${reminder.propertyName} · ${reminder.subtitle}',
             propertyId: reminder.propertyId,
+            propertyName: reminder.propertyName,
           );
         }
       case ReminderKind.contractExpire:
@@ -140,6 +151,7 @@ List<NotificationPlan> buildNotificationPlan({
             title: '合同还有 $days 天到期',
             body: '${reminder.propertyName} · 记得决定续租还是搬家',
             propertyId: reminder.propertyId,
+            propertyName: reminder.propertyName,
           );
         }
         add(
@@ -148,6 +160,7 @@ List<NotificationPlan> buildNotificationPlan({
           title: '合同今天到期',
           body: '${reminder.propertyName} · 退租记得现场对照片、要押金',
           propertyId: reminder.propertyId,
+          propertyName: reminder.propertyName,
         );
       case ReminderKind.utilityReading:
         // 从「本月提醒日」开始预排一整年；已经过去的月份自然会被 add() 丢掉
@@ -163,6 +176,7 @@ List<NotificationPlan> buildNotificationPlan({
             title: '该抄水电表了',
             body: '${reminder.propertyName} · 每月记一次，退租结算才说得清',
             propertyId: reminder.propertyId,
+            propertyName: reminder.propertyName,
           );
         }
       case ReminderKind.depositReturn:
@@ -175,9 +189,14 @@ List<NotificationPlan> buildNotificationPlan({
           title: reminder.title,
           body: '${reminder.propertyName} · ${reminder.subtitle}',
           propertyId: reminder.propertyId,
+          propertyName: reminder.propertyName,
         );
       case ReminderKind.photoMissing:
         // 没有「到点」语义，留在首页待办
+        break;
+      case ReminderKind.moveInReading:
+        // 同上：填个表底数没有「什么时候该填」，
+        // 排成系统通知只会变成一条催命符，留在首页待办里就行
         break;
     }
   }

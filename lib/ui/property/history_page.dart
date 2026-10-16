@@ -8,7 +8,6 @@ import '../../utils/format.dart';
 import '../kit.dart';
 import '../media.dart';
 import 'property_detail_page.dart';
-import 'property_edit_page.dart';
 
 /// 历史租住：已经退租（含仍在维权的）的房子
 class HistoryPage extends StatelessWidget {
@@ -29,22 +28,15 @@ class HistoryPage extends StatelessWidget {
           ZAppBar(
             leading: const ZBackButton(),
             title: '历史租住',
-            subtitle: history.isEmpty ? null : '共 ${history.length} 套',
-            actions: [
-              ZIconButton(
-                icon: Icons.add_rounded,
-                tooltip: '新增一套租住',
-                color: Z.ink,
-                onTap: () => zPush(context, const PropertyEditPage()),
-              ),
-            ],
+            // 不摆「共 N 套」和右侧的新增按钮：这里是回顾过去的地方，
+            // 加房源在租住页那边做
           ),
           Expanded(
             child: history.isEmpty
                 ? const ZEmpty(
                     icon: Icons.history_rounded,
                     title: '还没有历史租住',
-                    message: '退租后把押金状态改成「已退还 / 已扣除」，'
+                    message: '退租后把押金状态改成「已退还 / 部分扣除」，'
                         '这套房子就会出现在这里，照片和费用记录都会保留。',
                   )
                 : ListView(
@@ -61,11 +53,7 @@ class HistoryPage extends StatelessWidget {
                           const SizedBox(height: 10),
                         ],
                       ],
-                      const SizedBox(height: 4),
-                      const ZHintBar(
-                        text: '历史记录的取证照片、费用与维权材料都还在，'
-                            '随时可以点开查看或再次导出报告。',
-                      ),
+                      const SizedBox(height: 4)
                     ],
                   ),
           ),
@@ -78,6 +66,13 @@ class HistoryPage extends StatelessWidget {
 /// 退租时间：优先用押金退还日期，否则退回最后更新时间
 DateTime _leftAt(Property property) =>
     property.deposit.returnedDate ?? property.updatedAt;
+
+/// 押金那行：共享的 depositLine + 「存证 N 张」。
+///
+/// 「没退到手」也算正常结局（押金没到手也能退租），所以照实写「未退还」，
+/// 不退到手再回来补金额。
+String _depositLine(Property property, int photos) =>
+    '${depositLine(property)} · 存证 $photos 张';
 
 List<({int year, List<Property> items})> _groupByYear(
   List<Property> properties,
@@ -99,7 +94,6 @@ class _HistoryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final repository = context.watch<Repository>();
     final photos = repository.photoCountOf(property.id);
-    final deposit = property.deposit;
     final leftAt = _leftAt(property);
     final inDispute = property.status == PropertyStatus.dispute;
 
@@ -110,11 +104,15 @@ class _HistoryCard extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ZPhoto(
-            ref: property.coverRef,
+          // 封面固定用内置那张黄昏图：历史列表里不跟真实照片走
+          // （和租住页的固定封面同一个思路，避免旧照片缺失/糊掉）
+          SizedBox(
             width: 72,
             height: 72,
-            radius: Z.rMd,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(Z.rMd),
+              child: const ZHistoryCover(),
+            ),
           ),
           const SizedBox(width: Z.s3),
           Expanded(
@@ -152,10 +150,7 @@ class _HistoryCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 _line(
-                  '押金${deposit.status.label}'
-                  '${deposit.returnedAmount > 0 ? ' ${fmtMoney(deposit.returnedAmount)}' : ''}'
-                  '${deposit.deductedAmount > 0 ? ' · 扣除 ${fmtMoney(deposit.deductedAmount)}' : ''}'
-                  ' · 存证 $photos 张',
+                  _depositLine(property, photos),
                   color: inDispute ? Z.danger : Z.ink2,
                 ),
                 const SizedBox(height: 2),

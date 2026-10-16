@@ -315,11 +315,17 @@ class CloudService extends ChangeNotifier implements CloudBridge {
     }
     _setState(SyncState.syncing);
     try {
+      // 先把还只在本机的照片补传成云端引用：游客态拍的和当时上传失败的都算。
+      // 以前 push 只推 JSON，本机路径会被原样写进云端，换设备后那一串引用
+      // 全是读不到的路径。
+      await repository.backfillCloudMedia();
       await config.saveUserConfig(
         paramKey: session.dataKey,
         paramValue: repository.cloudJson(),
         remark: '租盾数据',
       );
+      // 数据确实进了云端之后，本机这份原图才可以删（本机只留浏览缓存）
+      await repository.releaseLocalMedia();
       await _setPending(false);
       await repository.store.setString(_scopeKey, session.scope);
       _lastSyncedAt = DateTime.now();

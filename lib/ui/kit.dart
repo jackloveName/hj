@@ -114,6 +114,9 @@ class ZAppBar extends StatelessWidget implements PreferredSizeWidget {
       // 标题用 Stack 真正居中（左返回键 / 右操作不参与居中计算），
       // 左右各留出 44 让位，标题过长时省略而不是压到按钮上
       child: Stack(
+        // 非定位子节点（左返回键 / 右操作那一行）默认是「顶部对齐」，
+        // 结果返回键比居中的标题高半个身位 —— 这里显式居中对齐
+        alignment: Alignment.center,
         children: [
           Positioned.fill(
             child: Padding(
@@ -666,7 +669,7 @@ class ZListRow extends StatelessWidget {
     this.onTap,
     this.divider = true,
     this.titleColor,
-    this.chevron = true,
+    this.chevron,
   });
 
   final String title;
@@ -679,8 +682,12 @@ class ZListRow extends StatelessWidget {
   final bool divider;
   final Color? titleColor;
 
-  /// 右箭头：null = 有 onTap 就自动给（各页不用再手写）；
-  /// true / false = 强制有 / 强制没有（例如整张卡可点、行内自己没有 onTap）
+  /// 右箭头：null（默认）= 有 onTap 才画；true / false = 强制有 / 强制没有。
+  ///
+  /// 默认留 null 而不是 true：箭头是在说「这行点得动」，没绑 onTap 的行
+  /// 画了它就是空头支票（维权指南的法条清单就白拿过一个点不动的箭头）。
+  /// 整张卡可点、行内自己没有 onTap 的场景（费用页「抄表与费用趋势」那种），
+  /// 显式传 `chevron: true`。
   final bool? chevron;
 
   @override
@@ -707,7 +714,8 @@ class ZListRow extends StatelessWidget {
                   title,
                   style: ZText.bodyStrong.copyWith(color: titleColor ?? Z.ink),
                 ),
-                if (subtitle != null) ...[
+                // 空副标题不留空行：整行只显示标题，别白占一行高度
+                if (subtitle != null && subtitle!.isNotEmpty) ...[
                   const SizedBox(height: 2),
                   Text(subtitle!, style: ZText.caption.copyWith(height: 1.45)),
                 ],

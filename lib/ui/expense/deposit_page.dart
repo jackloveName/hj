@@ -21,6 +21,17 @@ class DepositPage extends StatelessWidget {
     if (property == null) return const ZScreen(child: SizedBox.shrink());
     final deposit = property.deposit;
     final (bg, fg) = ZTag.paletteOf(deposit.status.tone);
+    // 已退租：押金只能继续往后走（待退还 → 已退还 / 部分扣除 / 纠纷中），
+    // 不再给「改回已缴纳 / 无押金」的回头路 —— 那等于把一次退租撤销掉。
+    //
+    // 纠纷中不一样（口径）：押金可以改回「已缴纳 / 无押金」（比如房东其实
+    // 没收这笔钱），但房源仍然留在纠纷里 —— 押金只是一笔钱的状态，
+    // 拽不动房源状态（见 `propertyStatusAfterDeposit`），要收尾走「退租」页。
+    final locked = property.status == PropertyStatus.ended;
+    final inDispute = property.status == PropertyStatus.dispute;
+    bool blocked(DepositStatus status) =>
+        locked &&
+        (status == DepositStatus.paid || status == DepositStatus.none);
 
     return ZScreen(
       child: Column(
@@ -104,11 +115,39 @@ class DepositPage extends StatelessWidget {
                       ChoiceChip(
                         label: Text(status.label),
                         selected: deposit.status == status,
-                        onSelected: (_) =>
-                            _update(context, repository, property, status),
+                        // 已退租的房子不摆回头路：这两项点了也没用
+                        // （纠纷中还留着，点完房源状态一动不动）
+                        onSelected: blocked(status)
+                            ? null
+                            : (_) => _update(
+                                context,
+                                repository,
+                                property,
+                                status,
+                              ),
                       ),
                   ],
                 ),
+                if (locked)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 10),
+                    child: ZHintBar(
+                      text: '这套房已经退租：押金只能继续往后走'
+                          '（待退还 / 已退还 / 部分扣除 / 纠纷中），'
+                          '不能再改回「已缴纳 / 无押金」—— 那等于把退租撤销掉。',
+                      icon: Icons.lock_outline_rounded,
+                    ),
+                  )
+                else if (inDispute)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 10),
+                    child: ZHintBar(
+                      text: '纠纷中的房子：押金可以改回「已缴纳 / 无押金」'
+                          '（比如房东其实没收这笔钱），但房源仍然留在纠纷中，'
+                          '不会恢复「租住中」；要收尾走「退租」页。',
+                      icon: Icons.gavel_outlined,
+                    ),
+                  ),
                 const ZSectionTitle(
                   title: '金额明细',
                   icon: Icons.receipt_long_outlined,
@@ -162,6 +201,35 @@ class DepositPage extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 16),
+                // 「退租」页记下的对接信息在这里也露一下：
+                // 押金和交接是同一件事的两面，别让人以为填丢了
+                if (deposit.handoverDone || deposit.handoverNote.isNotEmpty) ...[
+                  const ZSectionTitle(
+                    title: '与房东对接',
+                    icon: Icons.handshake_outlined,
+                  ),
+                  ZCard(
+                    padding: const EdgeInsets.symmetric(horizontal: 15),
+                    child: Column(
+                      children: [
+                        ZKv(
+                          label: '交接',
+                          value: deposit.handoverDone ? '已完成' : '未完成',
+                          valueColor: deposit.handoverDone
+                              ? Z.okDeep
+                              : Z.ink3,
+                          divider: deposit.handoverNote.isNotEmpty,
+                        ),
+                        if (deposit.handoverNote.isNotEmpty)
+                          ZKv(
+                            label: '交接备注',
+                            value: deposit.handoverNote,
+                            divider: false,
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
                 Row(
                   children: [
                     Expanded(
@@ -255,6 +323,13 @@ class DepositPage extends StatelessWidget {
   ) async {
     final deposit = property.deposit;
     if (deposit.status == status) return;
+    // 兜底：已退租的房子不能改回「已缴纳 / 无押金」——
+    // 那等于撤销退租。纠纷中不拦（改完房源状态也不会动）
+    if (property.status == PropertyStatus.ended &&
+        (status == DepositStatus.paid || status == DepositStatus.none)) {
+      zToast(context, '这套房已经退租，不能改回「${status.label}」');
+      return;
+    }
     final logs = [
       ...deposit.logs,
       DepositLog(status: status, time: DateTime.now(), note: '手动更新状态'),
@@ -269,8 +344,9 @@ class DepositPage extends StatelessWidget {
     await repository.updateProperty(
       property.copyWith(
         deposit: updated,
-        // 押金状态与房源状态保持联动，改回去也能恢复
-        status: statusForDeposit(status),
+        // 只有还在租住中的房子跟着押金联动；已退租 / 纠纷中只是押金记账，
+        // 房源状态一动不动（房源状态的出口在「退租」页与「去纠纷」）
+        status: propertyStatusAfterDeposit(property.status, status),
       ),
     );
     if (context.mounted) zToast(context, '已更新为「${status.label}」');

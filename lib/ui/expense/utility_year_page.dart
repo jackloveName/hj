@@ -34,6 +34,20 @@ class UtilityYearPage extends StatelessWidget {
     };
     final thisYear = '${DateTime.now().year}';
     final currentMonth = monthKey(DateTime.now());
+    // 只列「开始租住」之后的月份：租住之前的月份不属于我的记录，
+    // 也不该给我一个「去补录」的入口
+    final moveInMonth = monthKey(
+      repository.propertyById(propertyId)?.contract.moveInDate ?? DateTime.now(),
+    );
+    // 这一年实际要列哪些月（倒序）。分不分隔线看「是不是最后一行」，
+    // 不能写死 month != 1 —— 从 5 月入住时最后一行是 5 月，写死的话
+    // 卡片底部会多出一条横线
+    final months = [
+      for (var month = 12; month >= 1; month--)
+        if ('$year-${month.toString().padLeft(2, '0')}'.compareTo(moveInMonth) >=
+            0)
+          month,
+    ];
 
     return ZScreen(
       child: Column(
@@ -59,17 +73,19 @@ class UtilityYearPage extends StatelessWidget {
                   ),
                   child: Column(
                     children: [
-                      for (var month = 12; month >= 1; month--)
+                      for (var i = 0; i < months.length; i++)
                         _MonthRow(
-                          monthKeyOf: '$year-${month.toString().padLeft(2, '0')}',
-                          record: byMonth[
-                              '$year-${month.toString().padLeft(2, '0')}'],
+                          monthKeyOf:
+                              '$year-${months[i].toString().padLeft(2, '0')}',
+                          record:
+                              byMonth['$year-${months[i].toString().padLeft(2, '0')}'],
                           canAdd:
                               year == thisYear &&
-                              '$year-${month.toString().padLeft(2, '0')}'
+                              '$year-${months[i].toString().padLeft(2, '0')}'
                                   .compareTo(currentMonth) <=
                               0,
-                          divider: month != 1,
+                          // 最后一行不画底线：别让卡片底部多出一横
+                          divider: i != months.length - 1,
                           propertyId: propertyId,
                         ),
                     ],
@@ -106,7 +122,7 @@ class _YearSummaryCard extends StatelessWidget {
             textBaseline: TextBaseline.alphabetic,
             children: [
               Text('年度合计', style: ZText.small),
-              const SizedBox(width: 8),
+              const Spacer(),
               Text(
                 fmtMoney(summary.cost),
                 style: ZText.title2.copyWith(color: Z.brand, fontSize: 20),

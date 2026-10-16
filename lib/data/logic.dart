@@ -114,10 +114,206 @@ PropertyStatus statusForDeposit(DepositStatus deposit) => switch (deposit) {
   DepositStatus.inDispute => PropertyStatus.dispute,
 };
 
+/// 改完押金之后房源状态落在哪：**只有还在租住中的房子跟着押金联动**。
+///
+/// 已退租 / 纠纷中的房子，押金只是一笔钱的状态：改押金（包括改回
+/// 「已缴纳 / 无押金」）都不动房源状态 —— 不会把房子拽回「租住中」，
+/// 也不会把纠纷顺手改成已退租。
+/// 房源状态的出口只有两个：退租页的「完成退租」和详情页的「去纠纷」。
+PropertyStatus propertyStatusAfterDeposit(
+  PropertyStatus current,
+  DepositStatus deposit,
+) => current == PropertyStatus.active
+    ? statusForDeposit(deposit)
+    : current;
+
 /// 还能不能给这套房子新增抄表记录：**已退租（含维权中）之后只读归档**，
 /// 只能翻记录、导出，不再允许新增或修改。
 bool canAddUtility(Property property) =>
     property.status == PropertyStatus.active;
+
+/// 还能不能改这套房的资料（房源信息、合同、照片、法律要求）：
+/// **只有在租住中**。
+///
+/// 从「历史租住」点进来的是过去的事：已退租只允许查看，
+/// 纠纷中只留「维权」相关的几件事（继续记沟通留证见 [canAddTimeline]，
+/// 结算押金走退租页）。
+bool canEditProperty(Property property) =>
+    property.status == PropertyStatus.active;
+
+/// 「房东要求」一共几条：记下来的约定 + 合同里写的特殊条款。
+///
+/// 合同里的特殊条款也是房东要求（房东要求页就是这么并排展示的），
+/// 所以详情页那个格子、维权材料那行、归档视图都按这个口径数，别各数各的 ——
+/// 否则合同里写着「不可养宠物」却显示「0 条约定」。
+int landlordRuleCount(Property property, List<LandlordRule> rules) =>
+    rules.length + (property.contract.specialTerms.trim().isEmpty ? 0 : 1);
+
+/// 押金那行怎么说：退了 / 被扣 / 还是没退。
+///
+/// 历史卡片、费用页的押金总览都用它，口径一致（没退到手就照实写「未退还」）。
+String depositLine(Property property) {
+  final deposit = property.deposit;
+  final total = property.contract.deposit;
+  return switch (deposit.status) {
+    DepositStatus.returned =>
+      '押金已退还'
+          '${deposit.returnedAmount > 0 ? ' ${fmtMoney(deposit.returnedAmount)}' : ''}',
+    DepositStatus.partiallyDeducted =>
+      '押金退还 ${fmtMoney(deposit.returnedAmount)}'
+          ' · 扣除 ${fmtMoney(deposit.deductedAmount)}',
+    DepositStatus.toBeReturned => '押金 ${fmtMoney(total)} 未退还',
+    DepositStatus.inDispute =>
+      '押金${deposit.status.label}（${fmtMoney(total)}）',
+    _ => '押金${deposit.status.label}',
+  };
+}
+
+/// 还没退到手的押金：待退还算全部；纠纷中算争议的那部分（没填金额就算全部）；
+/// 已退还 / 部分扣除（钱已经到手或已谈妥）不算。
+double outstandingDeposit(Property property) {
+  final deposit = property.deposit;
+  return switch (deposit.status) {
+    DepositStatus.toBeReturned ||
+    DepositStatus.paid => property.contract.deposit,
+    DepositStatus.inDispute =>
+      deposit.deductedAmount > 0 ? deposit.deductedAmount : property.contract.deposit,
+    _ => 0,
+  };
+}
+
+/// 退租日：优先押金退还日期，其次最后一条「退租类」状态记录，
+/// 都没有就退回合同到期日（数据不全时至少给个合理的答案）。
+DateTime moveOutDate(Property property) {
+  final deposit = property.deposit;
+  if (deposit.returnedDate != null) return dateOnly(deposit.returnedDate!);
+  for (final log in deposit.logs.reversed) {
+    switch (log.status) {
+      case DepositStatus.toBeReturned:
+      case DepositStatus.partiallyDeducted:
+      case DepositStatus.returned:
+      case DepositStatus.inDispute:
+        return dateOnly(log.time);
+      case DepositStatus.none:
+      case DepositStatus.paid:
+        break;
+    }
+  }
+  return dateOnly(property.contract.contractEnd);
+}
+
+/// 这套房一共住了多少天：入住日 → 退租日，**含首尾**
+/// （8/1 入住、8/31 搬走算 31 天，和「流浪天数」同一个口径）。
+int livedDays(Property property) {
+  final days =
+      daysBetween(dateOnly(property.contract.moveInDate), moveOutDate(property)) +
+      1;
+  return days > 0 ? days : 0;
+}
+
+/// 「租住回顾」要用的数字：住了多少天、租了几个月、实付房租、水电燃气，
+/// 以及留下多少张取证照片。已退租的房子在详情页顶部展示。
+class TenancyRecap {
+  const TenancyRecap({
+    required this.moveInDate,
+    required this.moveOutDate,
+    required this.days,
+    required this.contractMonths,
+    required this.paidMonths,
+    required this.paidRent,
+    required this.utilityCost,
+    required this.utilityRecords,
+    required this.photos,
+    required this.moveInPhotos,
+    required this.moveOutPhotos,
+  });
+
+  final DateTime moveInDate;
+  final DateTime moveOutDate;
+
+  /// 真正住了多少天（含首尾：8/1 入住、8/31 搬走算 31 天）
+  final int days;
+
+  /// 合同签了几个月
+  final int contractMonths;
+
+  /// 实际付过几期房租、一共付了多少
+  final int paidMonths;
+  final double paidRent;
+
+  /// 水电燃气累计支出与抄表次数
+  final double utilityCost;
+  final int utilityRecords;
+
+  /// 留下的取证照片（入住 / 退租各多少）
+  final int photos;
+  final int moveInPhotos;
+  final int moveOutPhotos;
+}
+
+TenancyRecap buildTenancyRecap({
+  required Property property,
+  required List<RentRecord> rents,
+  required List<UtilityRecord> utilities,
+  required List<EvidencePhoto> photos,
+}) {
+  final moveIn = dateOnly(property.contract.moveInDate);
+  final moveOut = moveOutDate(property);
+  final mine = photos.where((photo) => photo.propertyId == property.id);
+  // 合同租期按租金计划的期数算：它就是「一共几期房租」，
+  // 比 `totalMonths` 的月份差更贴近实际（后者会少算一期）
+  final planned = rents.where((rent) => rent.propertyId == property.id).length;
+  return TenancyRecap(
+    moveInDate: moveIn,
+    moveOutDate: moveOut,
+    days: livedDays(property),
+    contractMonths: planned > 0 ? planned : property.contract.totalMonths,
+    paidMonths: countPaidMonths(rents, property.id),
+    paidRent: sumPaidRent(rents, property.id),
+    utilityCost: sumUtilityCost(utilities, property.id),
+    utilityRecords: utilities
+        .where((record) => record.propertyId == property.id)
+        .length,
+    photos: mine.length,
+    moveInPhotos: mine
+        .where((photo) => photo.phase == PhotoPhase.moveIn)
+        .length,
+    moveOutPhotos: mine
+        .where((photo) => photo.phase == PhotoPhase.moveOut)
+        .length,
+  );
+}
+
+/// 这套房到底用不用燃气：**合同里勾了「有燃气表」**；
+/// 另外只要抄表记录里出现过燃气读数就算（兜住旧数据 —— 那时还没有这个开关）。
+///
+/// 「入住时的燃气表底数」只有用燃气的房子才需要填：家里压根没有燃气表
+/// 的话，逼着用户填个数（填 0 也是假的）只会让首页那条待办永远消不掉。
+/// 抄表录入那边「有没有燃气表」也用同一套判断。
+bool usesGas(
+  ContractInfo contract,
+  List<UtilityRecord> utilities,
+  String propertyId,
+) =>
+    contract.hasGasMeter ||
+    utilities.any(
+      (record) => record.propertyId == propertyId && record.gas != null,
+    );
+
+/// 入住时的表底数还缺几项：电、水必填，燃气只在这套房确实用燃气时才算
+/// （见 [usesGas]）。
+///
+/// 首页待办和合同页的「还有 N 项待补」都用它，免得两处口径跑偏 ——
+/// 曾经写死「三项齐全」的判据，结果没有燃气表的房子永远清不掉那条待办。
+int missingMoveInReadings(
+  ContractInfo contract,
+  List<UtilityRecord> utilities,
+  String propertyId,
+) => [
+  if (contract.moveInElectricity == null) 1,
+  if (contract.moveInWater == null) 1,
+  if (usesGas(contract, utilities, propertyId) && contract.moveInGas == null) 1,
+].length;
 
 /// 还能不能新增维修 / 沟通记录：已退租就归档只读；
 /// 押金纠纷期间仍然允许继续记录沟通（维权要留证）。
@@ -246,26 +442,14 @@ List<ReminderItem> buildReminders({
   final today = dateOnly(now);
 
   for (final property in properties) {
-    final waitingDays = now.difference(property.updatedAt).inDays;
+    // 已退租 / 纠纷中的房子：资料只读、也没有「本月该交租/该抄表」了，
+    // 那些提醒只会变成点进去啥也干不了的死待办；只有押金相关的继续催
+    final canAct = property.status == PropertyStatus.active;
 
-    if (config.enableDeposit &&
-        property.status == PropertyStatus.ended &&
-        property.deposit.status == DepositStatus.toBeReturned) {
-      list.add(
-        ReminderItem(
-          kind: ReminderKind.depositReturn,
-          title: '押金待退还',
-          subtitle: '${property.name} · 已等待 $waitingDays 天',
-          date: property.updatedAt,
-          daysLeft: 0,
-          propertyId: property.id,
-          propertyName: property.name,
-          tone: ZTone.warn,
-          actionLabel: '催要押金',
-        ),
-      );
-    }
-    if (property.status == PropertyStatus.dispute) {
+    // 「已退租」就等于这套房的流程走完了：不再催押金。
+    // 押金还没退到手这件事，在房源详情页的「租住回顾」里如实写着
+    // （列表里也照实显示「未退还」），不需要天天弹一条待办。
+    if (config.enableDeposit && property.status == PropertyStatus.dispute) {
       list.add(
         ReminderItem(
           kind: ReminderKind.depositReturn,
@@ -282,7 +466,7 @@ List<ReminderItem> buildReminders({
     }
     if (property.status != PropertyStatus.active) continue;
 
-    if (config.enableRent) {
+    if (canAct && config.enableRent) {
       // 优先提示真正未付的账单：交租日过去后不能再跳到下一个月
       final unpaid =
           rents
@@ -311,31 +495,50 @@ List<ReminderItem> buildReminders({
           ),
         );
       } else {
-        final due = nextRentDue(property.contract.rentDueDay, from: now);
-        final days = daysBetween(now, due);
-        if (days <= config.rentDaysAhead) {
-          list.add(
-            ReminderItem(
-              kind: ReminderKind.rentDue,
-              title: '该交房租了 · ${fmtMoney(property.contract.monthlyRent)}',
-              subtitle:
-                  '${fmtMonthDay(due)} 到期 · ${property.contract.paymentMethod}',
-              date: due,
-              daysLeft: days,
-              propertyId: property.id,
-              propertyName: property.name,
-              tone: ZTone.warn,
-              // 别写死「N 天后」：当天是「就是今天」、第二天是「明天」
-              actionLabel: relativeDays(days),
-              // 交租提醒不该排到合同到期之后
-              until: property.contract.contractEnd,
-            ),
-          );
+        // 什么时候该提醒，只看「最早那期还没付的账单」。
+        //
+        // ⚠️ 这里不能再拿日历上的下一个交租日（nextRentDue）算：本月账单提前
+        // 付掉之后，那个日子还在未来几天内，于是「费用里已经付了、待办里还提醒
+        // 该交房租」。有账期时一律按账单说话 —— 一期都没生成（刚建房源）才退回
+        // 日历，免得漏提醒。
+        final scheduled = rents.any((r) => r.propertyId == property.id);
+        final next = unpaid.isEmpty ? null : unpaid.first;
+        final due =
+            next?.dueDate ??
+            (scheduled
+                ? null
+                : nextRentDue(property.contract.rentDueDay, from: now));
+        if (due != null) {
+          final days = daysBetween(now, due);
+          if (days <= config.rentDaysAhead) {
+            list.add(
+              ReminderItem(
+                kind: ReminderKind.rentDue,
+                // 金额优先用那一期账单上的，合同月租只当兜底
+                title:
+                    '该交房租了 · '
+                    '${fmtMoney(next?.amount ?? property.contract.monthlyRent)}',
+                subtitle:
+                    '${fmtMonthDay(due)} 到期 · '
+                    '${property.contract.paymentMethod}',
+                date: due,
+                daysLeft: days,
+                propertyId: property.id,
+                propertyName: property.name,
+                tone: ZTone.warn,
+                // 别写死「N 天后」：当天是「就是今天」、第二天是「明天」
+                actionLabel: relativeDays(days),
+                // 交租提醒不该排到合同到期之后
+                until: property.contract.contractEnd,
+              ),
+            );
+          }
         }
       }
     }
 
-    if (config.enableUtility &&
+    if (canAct &&
+        config.enableUtility &&
         _utilityOf(utilities, property.id, monthKey(now)) == null) {
       final latest = utilities
           .where((u) => u.propertyId == property.id)
@@ -363,7 +566,9 @@ List<ReminderItem> buildReminders({
       );
     }
 
-    if (config.enableContract && property.contract.contractEnd.isAfter(now)) {
+    if (canAct &&
+        config.enableContract &&
+        property.contract.contractEnd.isAfter(now)) {
       final days = daysBetween(now, property.contract.contractEnd);
       final thresholds = [...config.contractDaysAhead]..sort();
       final max = thresholds.isEmpty ? 30 : thresholds.last;
@@ -387,7 +592,8 @@ List<ReminderItem> buildReminders({
       }
     }
 
-    if (_countPhotos(photos, property.id, phase: PhotoPhase.moveIn) == 0) {
+    if (canAct &&
+        _countPhotos(photos, property.id, phase: PhotoPhase.moveIn) == 0) {
       list.add(
         ReminderItem(
           kind: ReminderKind.photoMissing,
@@ -399,6 +605,37 @@ List<ReminderItem> buildReminders({
           propertyName: property.name,
           tone: ZTone.brand,
           actionLabel: '去拍照',
+        ),
+      );
+    }
+
+    // 入住时的表底数缺了就提醒补：抄表录入的首月用量要靠它当基准，
+    // 缺了就只算得出「本月读数 − 0」这种明显不对的数。
+    //
+    // 几个口径：
+    // - 只在租住中的房子上提醒：已退租的抄表记录已经只读归档，补了也用不上
+    //   （跟 canAddUtility 一个口径）；
+    // - 关掉「抄表提醒」就不再催，这条待办只服务于抄表；
+    // - 燃气表底数只对**确实在用燃气**的房子要求（见 [usesGas]），
+    //   不然没有燃气表的房子永远清不掉这条待办。
+    //
+    // 不写副标题：标题已经把「水/电表数」说全了，
+    // 再补一句「还差哪几块表」纯属重复占地方。
+    final contract = property.contract;
+    if (config.enableUtility &&
+        property.status == PropertyStatus.active &&
+        missingMoveInReadings(contract, utilities, property.id) > 0) {
+      list.add(
+        ReminderItem(
+          kind: ReminderKind.moveInReading,
+          title: '补填入住时的水/电表数',
+          subtitle: '',
+          date: now,
+          daysLeft: 0,
+          propertyId: property.id,
+          propertyName: property.name,
+          tone: ZTone.brand,
+          actionLabel: '去补填',
         ),
       );
     }
@@ -478,18 +715,21 @@ double sumUtilityCost(List<UtilityRecord> utilities, String propertyId) =>
 /// 「流浪天数」：所有房源真正在租的天数，**按自然日去重**。
 ///
 /// 同时在租两套房的那些天只算一天；换租、租期有重叠也一样只算一次。
-/// 在租的房子算到今天，已退租 / 纠纷的算到合同到期日（更接近「租住结束」）；
+/// 在租的房子算到今天，已退租 / 纠纷的算到**退租日**（见 [moveOutDate]）；
 /// 入住当天也算一天，还没到入住日（入住日在未来）的不计入。
 int countWanderingDays(List<Property> properties, {DateTime? now}) {
   final today = dateOnly(now ?? DateTime.now());
   final intervals = <({DateTime start, DateTime end})>[];
   for (final property in properties) {
     final start = dateOnly(property.contract.moveInDate);
-    final end = dateOnly(
-      property.status == PropertyStatus.active
-          ? today
-          : property.contract.contractEnd,
-    );
+    // 退租之后按实际退租日算：提前退租时合同还挂着，
+    // 拿合同到期日当结束会把搬走之后（甚至未来）的天数也算成「流浪」，
+    // 数字越看越大还莫名其妙
+    final ended = property.status == PropertyStatus.active
+        ? today
+        : moveOutDate(property);
+    // 兜底：结束日不该超过今天，别把未来的天数算进来
+    final end = ended.isAfter(today) ? today : ended;
     if (daysBetween(start, end) < 0) continue;
     intervals.add((start: start, end: end));
   }

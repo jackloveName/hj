@@ -8,7 +8,6 @@ import '../kit.dart';
 import '../media.dart';
 import '../pickers.dart';
 import 'capture_page.dart';
-import 'evidence_export_page.dart';
 import 'room_album_page.dart';
 
 /// SCREEN 03 · 入住取证 · 选房间
@@ -41,15 +40,19 @@ class _EvidenceRoomsPageState extends State<EvidenceRoomsPage> {
     final total = repository.photoCountOf(property.id, phase: _phase);
     // 角标与下方分区保持同一口径：都统计当前阶段
     final quota = '$total 张';
+    // 已退租 / 纠纷中只读：照片可以翻，不能再拍、不能再加房间
+    final editable = canEditProperty(property);
 
     return ZScreen(
-      bottomBar: ZBottomBar(
-        child: ZButton(
-          icon: Icons.photo_camera_outlined,
-          label: '为「${rooms[_selectedRoom]}」拍照取证',
-          onTap: () => _capture(context, repository, rooms[_selectedRoom]),
-        ),
-      ),
+      bottomBar: editable
+          ? ZBottomBar(
+              child: ZButton(
+                icon: Icons.photo_camera_outlined,
+                label: '为「${rooms[_selectedRoom]}」拍照取证',
+                onTap: () => _capture(context, repository, rooms[_selectedRoom]),
+              ),
+            )
+          : null,
       child: Column(
         children: [
           ZAppBar(
@@ -65,10 +68,8 @@ class _EvidenceRoomsPageState extends State<EvidenceRoomsPage> {
           ),
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
               children: [
-                const ZSteps(steps: ['选房间', '拍照', '标注', '存证'], current: 0),
-                const SizedBox(height: 16),
                 ZChips<PhotoPhase>(
                   options: PhotoPhase.values,
                   value: _phase,
@@ -112,20 +113,11 @@ class _EvidenceRoomsPageState extends State<EvidenceRoomsPage> {
                           ),
                         ),
                       ),
-                    _AddRoomTile(
-                      onTap: () => _addRoom(context, repository, property),
-                    ),
+                    if (editable)
+                      _AddRoomTile(
+                        onTap: () => _addRoom(context, repository, property),
+                      ),
                   ],
-                ),
-                const SizedBox(height: 16),
-                ZButton(
-                  label: '生成取证清单 / 照片包',
-                  style: ZButtonStyle.ghost,
-                  icon: Icons.ios_share,
-                  onTap: () => zPush(
-                    context,
-                    EvidenceExportPage(propertyId: property.id, phase: _phase),
-                  ),
                 ),
               ],
             ),
@@ -163,15 +155,18 @@ class _EvidenceRoomsPageState extends State<EvidenceRoomsPage> {
     Repository repository,
     Property property,
   ) async {
-    final controller = TextEditingController();
+    // 刻意不用 TextEditingController：弹窗退场动画还在跑的时候 dispose 它，
+    // TextField 会拿着已释放的控制器重建，直接红屏。这里只要「按下确定时
+    // 拿到当前输入」，一个局部变量就够。
+    var typed = '';
     final name = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('添加房间'),
         content: TextField(
-          controller: controller,
           autofocus: true,
           decoration: const InputDecoration(hintText: '如：书房'),
+          onChanged: (text) => typed = text,
         ),
         actions: [
           TextButton(
@@ -179,13 +174,12 @@ class _EvidenceRoomsPageState extends State<EvidenceRoomsPage> {
             child: Text('取消', style: TextStyle(color: Z.ink3)),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+            onPressed: () => Navigator.of(ctx).pop(typed.trim()),
             child: const Text('添加'),
           ),
         ],
       ),
     );
-    controller.dispose();
     if (name == null || name.isEmpty) return;
     await repository.updateProperty(
       property.copyWith(rooms: [...property.rooms, name]),
@@ -230,18 +224,8 @@ class _RoomTile extends StatelessWidget {
               child: ZPhoto(
                 ref: thumbRef,
                 radius: Z.rSm,
-                watermark: ['$room · $count 张'],
-                overlay: count == 0
-                    ? Container(
-                        color: Z.card.withValues(alpha: 0.55),
-                        alignment: Alignment.center,
-                        child: const Icon(
-                          Icons.add_a_photo_outlined,
-                          size: 18,
-                          color: Z.brand,
-                        ),
-                      )
-                    : null,
+                // 房间名就在格子下方（「客厅」），照片上只留张数
+                watermark: ['$count 张'],
               ),
             ),
           ),
@@ -274,20 +258,36 @@ class _AddRoomTile extends StatelessWidget {
         Expanded(
           child: InkWell(
             onTap: onTap,
-            borderRadius: BorderRadius.circular(Z.rSm),
+            borderRadius: BorderRadius.circular(Z.rMd),
             child: Container(
+              // 外框跟 _RoomTile 一模一样（1.6 透明描边 + 1.5 内边距），
+              // 这样虚线格和照片格一样大、四边也对齐
+              padding: const EdgeInsets.all(1.5),
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(Z.rSm),
-                border: Border.all(color: Z.dashed, width: 1.4),
+                borderRadius: BorderRadius.circular(Z.rMd),
+                border: Border.all(color: Colors.transparent, width: 1.6),
               ),
-              child: Icon(Icons.add_rounded, size: 18, color: Z.ink4),
+              child: Container(
+                // 得显式居中：不加 alignment 时这个虚线框会缩到图标那么大
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(Z.rSm),
+                  border: Border.all(color: Z.dashed, width: 1.4),
+                ),
+                child: Icon(Icons.add_rounded, size: 18, color: Z.ink4),
+              ),
             ),
           ),
         ),
         const SizedBox(height: 4),
         const Text(
           '',
-          style: TextStyle(fontFamily: Z.font, fontFamilyFallback: Z.fallback),
+          // 占位一行：字号跟房间名一致，两个格子的高度才对得上
+          style: TextStyle(
+            fontFamily: Z.font,
+            fontFamilyFallback: Z.fallback,
+            fontSize: 11.5,
+          ),
         ),
       ],
     );

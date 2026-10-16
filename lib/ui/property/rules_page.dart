@@ -20,10 +20,11 @@ class RulesPage extends StatelessWidget {
     final rules = repository.rulesOf(propertyId);
     // 编辑房源时填的「特殊条款」也属于房东要求：一并摆出来，
     // 不然用户以为写进合同就自动生效了
-    final specialTerms =
-        repository.propertyById(propertyId)?.contract.specialTerms.trim() ??
-        '';
+    final property = repository.propertyById(propertyId);
+    final specialTerms = property?.contract.specialTerms.trim() ?? '';
     final hasAny = rules.isNotEmpty || specialTerms.isNotEmpty;
+    // 已退租 / 纠纷中的房子只读：能翻要求，但不能加、不能改
+    final editable = property != null && canEditProperty(property);
 
     return ZScreen(
       child: Column(
@@ -32,12 +33,13 @@ class RulesPage extends StatelessWidget {
             leading: const ZBackButton(),
             title: '房东要求',
             actions: [
-              ZIconButton(
-                icon: Icons.add_rounded,
-                color: Z.brand,
-                tooltip: '添加要求',
-                onTap: () => _edit(context, repository, propertyId),
-              ),
+              if (editable)
+                ZIconButton(
+                  icon: Icons.add_rounded,
+                  color: Z.brand,
+                  tooltip: '添加要求',
+                  onTap: () => _edit(context, repository, propertyId),
+                ),
             ],
           ),
           Expanded(
@@ -46,8 +48,10 @@ class RulesPage extends StatelessWidget {
                     icon: Icons.rule_folder_outlined,
                     title: '还没有记录房东要求',
                     message: '把房东的“特殊约定”写下来，退租时才不会被翻旧账。',
-                    actionLabel: '添加要求',
-                    onAction: () => _edit(context, repository, propertyId),
+                    actionLabel: editable ? '添加要求' : null,
+                    onAction: editable
+                        ? () => _edit(context, repository, propertyId)
+                        : null,
                   )
                 : ListView(
                     padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
@@ -108,12 +112,14 @@ class RulesPage extends StatelessWidget {
                       for (final rule in rules)
                         _RuleCard(
                           rule: rule,
-                          onTap: () => _edit(
-                            context,
-                            repository,
-                            propertyId,
-                            rule: rule,
-                          ),
+                          onTap: editable
+                              ? () => _edit(
+                                  context,
+                                  repository,
+                                  propertyId,
+                                  rule: rule,
+                                )
+                              : null,
                         ),
                     ],
                   ),
@@ -147,10 +153,12 @@ class RulesPage extends StatelessWidget {
 /// 挂在「退租需提前 30 天通知」这类要求前面会让人误会。
 /// 现在改成中性的「要求」标记，内容当主角，来源 / 时间 / 证据排在下面。
 class _RuleCard extends StatelessWidget {
-  const _RuleCard({required this.rule, required this.onTap});
+  const _RuleCard({required this.rule, this.onTap});
 
   final LandlordRule rule;
-  final VoidCallback onTap;
+
+  /// 只读时传 null：卡片照旧展示，只是点不动
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {

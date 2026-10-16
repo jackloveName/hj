@@ -28,6 +28,9 @@ class _PropertyEditPageState extends State<PropertyEditPage> {
   final TextEditingController _landlordWechat = TextEditingController();
   final TextEditingController _rent = TextEditingController();
   final TextEditingController _deposit = TextEditingController();
+  final TextEditingController _moveInElectricity = TextEditingController();
+  final TextEditingController _moveInWater = TextEditingController();
+  final TextEditingController _moveInGas = TextEditingController();
   final TextEditingController _early = TextEditingController();
   final TextEditingController _renewal = TextEditingController();
   final TextEditingController _special = TextEditingController();
@@ -41,6 +44,7 @@ class _PropertyEditPageState extends State<PropertyEditPage> {
   String _paymentMethod = '月付';
   String _rentScope = '整租';
   int _noticeDays = 30;
+  bool _hasGasMeter = false;
   DateTime _moveInDate = DateTime.now();
   DateTime _contractEnd = DateTime(
     DateTime.now().year + 1,
@@ -51,7 +55,6 @@ class _PropertyEditPageState extends State<PropertyEditPage> {
   bool _contractEndEdited = false;
   // 默认就是入住日前一天（入住日默认今天）
   int _rentDueDay = (DateTime.now().day - 1).clamp(1, 28);
-  PropertyStatus _status = PropertyStatus.active;
   Property? _existing;
   bool _busy = false;
 
@@ -79,6 +82,11 @@ class _PropertyEditPageState extends State<PropertyEditPage> {
     _landlordWechat.text = property.landlord.wechat;
     _rent.text = fmtAmount(property.contract.monthlyRent);
     _deposit.text = fmtAmount(property.contract.deposit);
+    _moveInElectricity.text = _readingText(
+      property.contract.moveInElectricity,
+    );
+    _moveInWater.text = _readingText(property.contract.moveInWater);
+    _moveInGas.text = _readingText(property.contract.moveInGas);
     _early.text = property.contract.earlyTermination;
     _renewal.text = property.contract.renewalTerms;
     _special.text = property.contract.specialTerms;
@@ -88,10 +96,17 @@ class _PropertyEditPageState extends State<PropertyEditPage> {
     _minLeaseMonths = property.contract.minLeaseMonths;
     if (_minLeaseMonths <= 0) _minLeaseMonths = 1;
     _hasDeposit = property.contract.deposit > 0;
+    // 旧数据没有这个开关，但抄表记录里记过燃气：按「有燃气表」带出来
+    _hasGasMeter =
+        property.contract.hasGasMeter ||
+        usesGas(
+          property.contract,
+          context.read<Repository>().utilitiesOf(property.id),
+          property.id,
+        );
     _moveInDate = property.contract.moveInDate;
     _contractEnd = property.contract.contractEnd;
     _rentDueDay = property.contract.rentDueDay;
-    _status = property.status;
   }
 
   @override
@@ -105,6 +120,9 @@ class _PropertyEditPageState extends State<PropertyEditPage> {
       _landlordWechat,
       _rent,
       _deposit,
+      _moveInElectricity,
+      _moveInWater,
+      _moveInGas,
       _early,
       _renewal,
       _special,
@@ -217,17 +235,6 @@ class _PropertyEditPageState extends State<PropertyEditPage> {
           hintText: '89',
           suffixText: '㎡',
         ),
-      ),
-    ),
-    ZField(
-      label: '房源状态',
-      child: ZChips<PropertyStatus>(
-        options: PropertyStatus.values,
-        value: _status,
-        emphasize: true,
-        padding: EdgeInsets.zero,
-        labelOf: (value) => value.label,
-        onChanged: (value) => setState(() => _status = value),
       ),
     ),
     const SizedBox(height: 10),
@@ -415,6 +422,59 @@ class _PropertyEditPageState extends State<PropertyEditPage> {
         ),
       ),
     ),
+    // 入住表底数：抄表录入的首月用量要拿它当基准。
+    // 选填 —— 先不填也建得起来，首页待办会一直提醒补。
+    // 先问有没有燃气表，再决定要不要填燃气表读数：
+    // 家里没燃气表的房子不该被追着填一个（填 0 也是假的）
+    ZField(
+      label: '有燃气表吗',
+      child: ZChips<bool>(
+        options: const [true, false],
+        value: _hasGasMeter,
+        emphasize: true,
+        padding: EdgeInsets.zero,
+        labelOf: (value) => value ? '有燃气表' : '没有燃气表',
+        onChanged: (value) => setState(() => _hasGasMeter = value),
+      ),
+    ),
+    ZField(
+      label: '入住时的表底数（选填）',
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _moveInElectricity,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: '电表'),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: TextField(
+              controller: _moveInWater,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: '水表'),
+            ),
+          ),
+          if (_hasGasMeter) ...[
+            const SizedBox(width: 10),
+            Expanded(
+              child: TextField(
+                controller: _moveInGas,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: '燃气表'),
+              ),
+            ),
+          ],
+        ],
+      ),
+    ),
+    const ZHintBar(
+      text: '填的是入住当天的表数（电 kWh / 水 m³）。'
+          '抄表录入的上月读数拿它；不填也能建房源，'
+          '只是首页会一直留着「补填水/电表数」这条待办。',
+      icon: Icons.speed_outlined,
+    ),
     const SizedBox(height: 10),
     ZHintBar(
       text:
@@ -485,10 +545,28 @@ class _PropertyEditPageState extends State<PropertyEditPage> {
   DateTime _addMonths(DateTime from, int months) =>
       DateTime(from.year, from.month + months, from.day);
 
+  /// 没抄过的表底数保持在空框里，别把「还没填」显示成 0
+  String _readingText(double? value) => value == null ? '' : fmtAmount(value);
+
+  /// 输入框里的表底数：空就是还没抄（null），不是 0
+  /// 输入框里的表底数读成数字。
+  ///
+  /// 空 = 没抄（清掉），填了非法字符（同事的「1.2.3」这种）就**保留原值**：
+  /// 用户是想改，不是想删，静默清掉等于把他的数弄丢了
+  /// （`_validateStep` 那边会先拦一道，这里只是兜底）。
+  double? _readingValue(TextEditingController controller, double? stored) {
+    final text = controller.text.trim();
+    if (text.isEmpty) return null;
+    return double.tryParse(text) ?? stored;
+  }
+
+  /// 一共几期（含首尾月）：和按租期生成的租金计划一致。
+  /// 纯月份差会少算一期，这里必须 +1（`ContractInfo.totalMonths` 同一个口径）
   int _months() {
     final months =
         (_contractEnd.year - _moveInDate.year) * 12 +
-        (_contractEnd.month - _moveInDate.month);
+        (_contractEnd.month - _moveInDate.month) +
+        1;
     return months <= 0 ? 1 : months;
   }
 
@@ -516,8 +594,104 @@ class _PropertyEditPageState extends State<PropertyEditPage> {
           return false;
         }
       }
+      // 表底数是选填的，但填了就得是数字：别让「1.2.3」这类手滑
+      // 静默变成「没填」，把之前存过的值抹掉
+      final readings = <String, TextEditingController>{
+        '电表': _moveInElectricity,
+        '水表': _moveInWater,
+        if (_hasGasMeter) '燃气表': _moveInGas,
+      };
+      for (final entry in readings.entries) {
+        final text = entry.value.text.trim();
+        if (text.isEmpty) continue;
+        if (double.tryParse(text) == null) {
+          zToast(context, '${entry.key}读数只能填数字');
+          return false;
+        }
+      }
     }
     return true;
+  }
+
+  /// 表底数和合同照片两边都能改：合同页那三个框（失焦即存）和那边照片的加号。
+  ///
+  /// 保存向导时先把两边合一下，别拿「打开向导时的快照」把人家刚改的盖回去：
+  /// - 别处改过、这里没动过 → 用别处的新值（合并）；
+  /// - 两边都改了 → 弹框问用户用哪个（这是真冲突）；
+  /// - 合同照片取并集（那边随时能加一页）。
+  Future<({double? elec, double? water, double? gas, List<String> photos})>
+  _mergeContractEdits(Repository repository) async {
+    final loaded = _existing?.contract;
+    final id = widget.propertyId;
+    final current = id == null ? null : repository.propertyById(id)?.contract;
+    if (loaded == null || current == null) {
+      // 新建房源（或仓库里那份没了）：照填的写
+      return (
+        elec: _readingValue(_moveInElectricity, null),
+        water: _readingValue(_moveInWater, null),
+        gas: _hasGasMeter ? _readingValue(_moveInGas, null) : null,
+        photos: const <String>[],
+      );
+    }
+
+    String show(double? value) => value == null ? '未填' : fmtAmount(value);
+
+    Future<double?> pick({
+      required String label,
+      required double? loadedValue,
+      required double? storedValue,
+      required TextEditingController controller,
+      bool enabled = true,
+    }) async {
+      // 明确关掉了这块表（改成「没有燃气表」）：以这里为准，直接清掉
+      if (!enabled) return null;
+      final typed = _readingValue(controller, loadedValue);
+      // 别处没动过：照这里填的写
+      if (storedValue == loadedValue) return typed;
+      // 别处动过、这里没动过：用别处的新值（合并，别抹掉人家刚填的）
+      if (typed == loadedValue) return storedValue;
+      // 两边都动过：问用户
+      final useMine = await zConfirm(
+        context,
+        title: '表底数两边都改过',
+        message:
+            '$label：打开这一页时是 ${show(loadedValue)}，'
+            '后来在合同页改成了 ${show(storedValue)}，'
+            '这里填的是 ${show(typed)}。用哪个？',
+        confirmText: '用这里填的',
+        cancelText: '用合同页的',
+      );
+      return useMine ? typed : storedValue;
+    }
+
+    final storedPhotos = current.contractPhotoRefs;
+    final loadedPhotos = loaded.contractPhotoRefs;
+    return (
+      elec: await pick(
+        label: '电表',
+        loadedValue: loaded.moveInElectricity,
+        storedValue: current.moveInElectricity,
+        controller: _moveInElectricity,
+      ),
+      water: await pick(
+        label: '水表',
+        loadedValue: loaded.moveInWater,
+        storedValue: current.moveInWater,
+        controller: _moveInWater,
+      ),
+      gas: await pick(
+        label: '燃气表',
+        loadedValue: loaded.moveInGas,
+        storedValue: current.moveInGas,
+        controller: _moveInGas,
+        enabled: _hasGasMeter,
+      ),
+      photos: [
+        ...storedPhotos,
+        for (final ref in loadedPhotos)
+          if (!storedPhotos.contains(ref)) ref,
+      ],
+    );
   }
 
   Future<void> _save() async {
@@ -528,6 +702,9 @@ class _PropertyEditPageState extends State<PropertyEditPage> {
     final depositValue = _hasDeposit
         ? (double.tryParse(_deposit.text.trim()) ?? 0)
         : 0.0;
+    // 表底数 / 合同照片两边都能改：先和仓库里最新的那份合一下
+    // （新建房源没人跟它抢，就是照填的写）
+    final readings = await _mergeContractEdits(repository);
     final contract = ContractInfo(
       monthlyRent: double.tryParse(_rent.text.trim()) ?? 0,
       deposit: depositValue,
@@ -541,7 +718,11 @@ class _PropertyEditPageState extends State<PropertyEditPage> {
       earlyTermination: _early.text.trim(),
       renewalTerms: _renewal.text.trim(),
       specialTerms: _special.text.trim(),
-      contractPhotoRefs: _existing?.contract.contractPhotoRefs ?? const [],
+      contractPhotoRefs: readings.photos,
+      hasGasMeter: _hasGasMeter,
+      moveInElectricity: readings.elec,
+      moveInWater: readings.water,
+      moveInGas: readings.gas,
     );
     final landlord = Landlord(
       name: _landlordName.text.trim(),
@@ -560,7 +741,9 @@ class _PropertyEditPageState extends State<PropertyEditPage> {
             area: _area.text.trim(),
             landlord: landlord,
             contract: contract,
-            status: _status,
+            // 状态不在这里手选：新建就是「租住中」，
+            // 之后由「押金追踪」的押金状态驱动（见 statusForDeposit）
+            status: PropertyStatus.active,
             deposit: DepositInfo(
               status: _hasDeposit ? DepositStatus.paid : DepositStatus.none,
               logs: [
@@ -594,15 +777,20 @@ class _PropertyEditPageState extends State<PropertyEditPage> {
           await zPush(context, EvidenceRoomsPage(propertyId: created.id));
         }
       } else {
+        // 以仓库里最新那份为底：向导打开之后，押金状态 / 房源状态 / 表底数
+        // 都可能在别处（押金追踪、合同页）改过，
+        // 别拿打开时的快照把它们盖回去
+        final base = repository.propertyById(_existing!.id) ?? _existing!;
         await repository.updateProperty(
-          _existing!.copyWith(
+          base.copyWith(
             name: _name.text.trim(),
             address: _address.text.trim(),
             layout: '$_rooms室$_halls厅$_baths卫',
             area: _area.text.trim(),
             landlord: landlord,
             contract: contract,
-            status: _status,
+            // 编辑时不动状态：退租 / 纠纷由「押金追踪」那边流转，
+            // 这里改合同资料不该把房子从「已退租」拽回「租住中」
           ),
         );
         if (!mounted) return;

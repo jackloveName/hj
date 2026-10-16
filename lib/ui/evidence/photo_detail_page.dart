@@ -24,14 +24,16 @@ class PhotoDetailPage extends StatelessWidget {
       );
     }
     final property = repository.propertyById(photo.propertyId);
+    // 已退租 / 纠纷中只读：照片能看，不能再标注、改说明、设封面、删除
+    final editable = property == null || canEditProperty(property);
 
     return ZScreen(
       child: Column(
         children: [
           ZAppBar(
             leading: const ZBackButton(),
-            title: '${photo.room} · ${photo.phase.label}',
-            subtitle: fmtDateTime(photo.timestamp),
+            // 「入住取证-客厅」：和相册页的标题格式保持一致
+            title: '${photo.phase.label}-${photo.room}',
             actions: [
               ZIconButton(
                 icon: Icons.zoom_out_map_rounded,
@@ -137,6 +139,7 @@ class PhotoDetailPage extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 16),
+                if (editable)
                 Row(
                   children: [
                     Expanded(
@@ -159,7 +162,7 @@ class PhotoDetailPage extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 10),
-                if (property != null)
+                if (property != null && editable)
                   ZButton(
                     label: '设为房源封面',
                     style: ZButtonStyle.ghost,
@@ -171,19 +174,21 @@ class PhotoDetailPage extends StatelessWidget {
                       if (context.mounted) zToast(context, '已设为封面');
                     },
                   ),
-                const SizedBox(height: 10),
-                TextButton.icon(
-                  onPressed: () => _delete(context, repository, photo),
-                  icon: const Icon(
-                    Icons.delete_outline_rounded,
-                    size: 18,
-                    color: Z.danger,
+                if (editable) ...[
+                  const SizedBox(height: 10),
+                  TextButton.icon(
+                    onPressed: () => _delete(context, repository, photo),
+                    icon: const Icon(
+                      Icons.delete_outline_rounded,
+                      size: 18,
+                      color: Z.danger,
+                    ),
+                    label: const Text(
+                      '删除照片（需二次确认）',
+                      style: TextStyle(color: Z.danger),
+                    ),
                   ),
-                  label: const Text(
-                    '删除照片（需二次确认）',
-                    style: TextStyle(color: Z.danger),
-                  ),
-                ),
+                ],
               ],
             ),
           ),
@@ -197,7 +202,9 @@ class PhotoDetailPage extends StatelessWidget {
     Repository repository,
     EvidencePhoto photo,
   ) async {
-    final controller = TextEditingController(text: photo.description);
+    // 别用 TextEditingController：下面这张 sheet 退场动画期间它一旦被 dispose，
+    // TextField 重建就会红屏。初值交给 initialValue，输入用局部变量收。
+    var typed = photo.description;
     var issue = photo.issueType;
     final saved = await showModalBottomSheet<bool>(
       context: context,
@@ -226,10 +233,11 @@ class PhotoDetailPage extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 14),
-                TextField(
-                  controller: controller,
+                TextFormField(
+                  initialValue: photo.description,
                   maxLines: 3,
                   decoration: const InputDecoration(hintText: '补充说明这个问题'),
+                  onChanged: (value) => typed = value,
                 ),
                 const SizedBox(height: 16),
                 ZButton(label: '保存', onTap: () => Navigator.of(ctx).pop(true)),
@@ -241,12 +249,11 @@ class PhotoDetailPage extends StatelessWidget {
     );
     if (saved == true) {
       await repository.updatePhoto(
-        photo.copyWith(issueType: issue, description: controller.text.trim()),
+        photo.copyWith(issueType: issue, description: typed.trim()),
         auditEntry: '更新问题说明为「${issue.label}」',
       );
       if (context.mounted) zToast(context, '已保存');
     }
-    controller.dispose();
   }
 
   Future<void> _annotate(

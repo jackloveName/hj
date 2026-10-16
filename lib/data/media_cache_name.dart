@@ -1,5 +1,14 @@
 import 'dart:convert';
 
+/// 引用里的文件名（上传云端时要用它定扩展名）：
+/// `media:p1/img_1.jpg` 与旧的绝对路径都能取到 `img_1.jpg`
+String mediaFileName(String ref) {
+  final parts = ref
+      .split(RegExp(r'[/\\]'))
+      .where((part) => part.isNotEmpty);
+  return parts.isEmpty ? '' : parts.last;
+}
+
 // 云端照片的本地缓存文件名：由引用（URL / oss 路径）算出稳定的短名。
 //
 // 不能直接把引用当文件名（含冒号、斜杠、查询串），因此做两次 32 位哈希拼接，

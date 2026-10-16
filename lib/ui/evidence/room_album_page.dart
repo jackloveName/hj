@@ -40,13 +40,17 @@ class _RoomAlbumPageState extends State<RoomAlbumPage> {
       phase: widget.phase,
       room: widget.room,
     );
+    // 已退租 / 纠纷中只读：相册能翻、能看，不能再追加拍摄
+    final property = repository.propertyById(widget.propertyId);
+    final editable = property != null && canEditProperty(property);
 
     return ZScreen(
       child: Column(
         children: [
           ZAppBar(
             leading: const ZBackButton(),
-            title: '$widget.room · ${widget.phase.label}',
+            // 「入住取证-客厅」：阶段在前，房间在后
+            title: '${widget.phase.label}-${widget.room}',
             subtitle: photos.isEmpty
                 ? null
                 : '已存证 ${photos.length} 张'
@@ -64,12 +68,13 @@ class _RoomAlbumPageState extends State<RoomAlbumPage> {
                     _current = _current.clamp(0, photos.length - 1);
                   }),
                 ),
-              ZIconButton(
-                icon: Icons.photo_camera_outlined,
-                color: Z.brand,
-                tooltip: '追加拍摄',
-                onTap: () => _add(context, repository),
-              ),
+              if (editable)
+                ZIconButton(
+                  icon: Icons.photo_camera_outlined,
+                  color: Z.brand,
+                  tooltip: '追加拍摄',
+                  onTap: () => _add(context, repository),
+                ),
             ],
           ),
           Expanded(
@@ -78,8 +83,8 @@ class _RoomAlbumPageState extends State<RoomAlbumPage> {
                     icon: Icons.photo_camera_outlined,
                     title: '${widget.room} 还没有照片',
                     message: '拍下这个房间的现状，系统会自动加时间水印。',
-                    actionLabel: '立即拍照',
-                    onAction: () => _add(context, repository),
+                    actionLabel: editable ? '立即拍照' : null,
+                    onAction: editable ? () => _add(context, repository) : null,
                   )
                 : _slideMode
                 ? PageView.builder(

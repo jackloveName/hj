@@ -63,7 +63,7 @@ class LocalNotificationChannel implements NotificationChannel {
 
   static const String _channelId = 'zudun_reminders';
   static const String _channelName = '租盾提醒';
-  static const String _channelDescription = '交租、合同到期、抄表与押金退还提醒';
+  static const String _channelDescription = '交租、合同到期、抄表与押金纠纷提醒';
 
   @override
   bool get supportsScheduling => !kIsWeb;
@@ -133,9 +133,25 @@ class LocalNotificationChannel implements NotificationChannel {
       await Future<void>.delayed(const Duration(milliseconds: 500));
       initialized = await tryInit();
     }
-    // Web 上返回 false 表示浏览器不支持；原生平台有的不返回值，按支持处理
-    return initialized ?? !kIsWeb;
+    return readyFromInitializeResult(initialized);
   }
+
+  /// 怎么解读插件 `initialize()` 的返回值。
+  ///
+  /// ⚠️ 苹果平台上这个返回值不是「初始化成没成功」，而是「这次初始化顺带要到
+  /// 授权没有」：`FlutterLocalNotificationsPlugin` 收到全 false 的授权请求会直接
+  /// 回 NO（见插件 iOS 侧 `requestPermissionsImpl`：三个 `request*Permission` 全
+  /// false 就 `result(@NO)` 返回）。我们的设计是启动时不弹授权框
+  /// （`DarwinInitializationSettings(requestAlertPermission: false, …)`），
+  /// 所以 iOS / macOS 上它**恒为 false**。
+  /// 一旦把 false 当成「平台不支持」，整条系统通知链就断了：开关点了没反应、
+  /// 排期一条也排不出去，页面上还写着「当前平台暂不支持系统通知」。
+  ///
+  /// 只有 Web 的 false 才是真的「浏览器不支持通知」；原生平台只要没抛异常、
+  /// 平台实现也解析得到（见 [_darwinRegistered]），就算初始化成功。
+  @visibleForTesting
+  static bool readyFromInitializeResult(bool? initialized) =>
+      kIsWeb ? (initialized ?? false) : true;
 
   /// iOS / macOS 的平台实现能不能解析到（解析不到 = Dart 插件注册没执行）
   bool get _darwinRegistered {

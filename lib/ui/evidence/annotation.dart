@@ -137,5 +137,7 @@ class PhotoLayer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) =>
-      ZPhoto(ref: photo.imageRef, fit: BoxFit.cover, radius: 0);
+      // contain 而不是 cover：照片可能比外框更方 / 更长（旧数据没存尺寸时
+      // 外框按 4:3 兜底），cover 会把边切掉，用户看到的就是「显示不全」
+      ZPhoto(ref: photo.imageRef, fit: BoxFit.contain, radius: 0);
 }

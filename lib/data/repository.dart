@@ -8,6 +8,7 @@ import 'cloud_bridge.dart';
 import 'cloud_ref.dart';
 import 'local_store.dart';
 import 'logic.dart';
+import 'media_cache_name.dart';
 import 'media_store.dart';
 
 export 'logic.dart';
@@ -434,11 +435,32 @@ class Repository extends ChangeNotifier {
     return null;
   }
 
-  List<UtilityRecord> utilitiesOf(String propertyId) =>
-      _utilities.where((u) => u.propertyId == propertyId).toList()
-        ..sort((a, b) => b.month.compareTo(a.month));
+  /// 某套房子的抄表记录：只给「开始租住」之后的月份。
+  ///
+  /// 租住之前的月份不属于这套租约（录错、或后来才改的起租日），
+  /// 既不该出现在记录里，也不该被当成用量基准。
+  List<UtilityRecord> utilitiesOf(String propertyId) {
+    final start = _utilityStartMonthOf(propertyId);
+    return _utilities
+        .where(
+          (u) =>
+              u.propertyId == propertyId &&
+              (start == null || u.month.compareTo(start) >= 0),
+        )
+        .toList()
+      ..sort((a, b) => b.month.compareTo(a.month));
+  }
+
+  /// 这套租约的起算月（`YYYY-MM`）；房源不存在或没填入住日期时返回 null
+  String? _utilityStartMonthOf(String propertyId) {
+    final property = propertyById(propertyId);
+    if (property == null) return null;
+    return monthKey(property.contract.moveInDate);
+  }
 
   UtilityRecord? utilityOfMonth(String propertyId, String month) {
+    final start = _utilityStartMonthOf(propertyId);
+    if (start != null && month.compareTo(start) < 0) return null;
     for (final item in _utilities) {
       if (item.propertyId == propertyId && item.month == month) return item;
     }
@@ -470,10 +492,20 @@ class Repository extends ChangeNotifier {
     return property;
   }
 
-  Future<void> updateProperty(Property property) async {
+  /// 更新一套房源。
+  ///
+  /// [touch] = false 表示「只改内容，不刷新更新时间」：补历史资料用它
+  /// （例如入住时的表底数）。`updatedAt` 不只是排序用的 ——
+  /// 首页「押金已等待 N 天」是拿它当起点算的，历史记录也按它排；
+  /// 补一条几个月前的数据不该让等待天数突然归零、把旧房源顶到列表前面。
+  Future<void> updateProperty(Property property, {bool touch = true}) async {
     final index = _properties.indexWhere((p) => p.id == property.id);
     if (index < 0) return;
-    _properties[index] = property.copyWith(updatedAt: DateTime.now());
+    _properties[index] = touch
+        ? property.copyWith(updatedAt: DateTime.now())
+        // 用仓库里原来那个时间：`copyWith` 默认会把 updatedAt 刷成现在，
+        // 调用方那边拼对象时很容易顺手带上新时间
+        : property.copyWith(updatedAt: _properties[index].updatedAt);
     _ensureRentSchedule(_properties[index]);
     await _persist();
   }
@@ -794,6 +826,8 @@ class Repository extends ChangeNotifier {
     try {
       // 先落本机：断网 / 未登录时照片依然可用
       localRef = await _media.saveBytes(bytes, folder: folder, name: name);
+      // 记一笔「本机写过这个文件」：传上云端之后它就该被清掉（见 releaseLocalMedia）
+      await _rememberLocalMedia(localRef);
       // 游客态：图片也不留在本机 —— 记一笔，下次以游客身份启动时删掉
       if (!_persistEnabled) await _rememberGuestMedia(localRef);
       _mediaBytes = await _media.usedBytes();
@@ -812,13 +846,136 @@ class Repository extends ChangeNotifier {
     try {
       final remoteRef = await bridge.uploadMedia(bytes, name: name);
       if (remoteRef == null) return localRef;
-      // 上传过的字节直接进缓存，避免马上又要下载回来
-      await _media.saveCloudBytes(remoteRef, bytes);
       return remoteRef;
     } catch (error) {
       _lastError = '照片已保存在本机，但上传云端失败：$error';
       return localRef;
     }
+  }
+
+  /// 把还只存在本机的照片补传成云端引用，返回补传成功的引用条数。
+  ///
+  /// 照片是**云优先**的：登录后拍完就上传，上传失败或游客态才先留在本机。
+  /// 留成本机引用的那些，以前没有任何补救机会（同步只推 JSON，不会再碰照片
+  /// 字节），数据推到别的设备上就是一串读不到的路径。登录后与每次同步前都跑
+  /// 一遍，跑完的本机文件由 [releaseLocalMedia] 清掉。
+  Future<int> backfillCloudMedia() async {
+    final bridge = cloud;
+    if (bridge == null || !bridge.enabled) return 0;
+    var healed = 0;
+    // 同一份本机文件只传一次（原图和缩略图偶尔是同一个引用）
+    final upgraded = <String, String?>{};
+    Future<String?> upload(String ref) async {
+      if (ref.isEmpty || OssRef.isRemote(ref)) return null;
+      if (!upgraded.containsKey(ref)) {
+        upgraded[ref] = await _uploadLocalRef(bridge, ref);
+      }
+      return upgraded[ref];
+    }
+
+    for (var i = 0; i < _photos.length; i++) {
+      final photo = _photos[i];
+      var next = photo;
+      final image = await upload(photo.imageRef);
+      if (image != null) {
+        next = next.copyWith(imageRef: image);
+        healed++;
+      }
+      final thumb = await upload(photo.thumbRef);
+      if (thumb != null) {
+        next = next.copyWith(thumbRef: thumb);
+        healed++;
+      }
+      if (!identical(next, photo)) _photos[i] = next;
+    }
+    if (healed == 0) return 0;
+    _invalidateDerived();
+    await _persist();
+    notifyListeners();
+    return healed;
+  }
+
+  /// 本机引用 → 云端引用；已经是云端引用、或本机也读不到字节（救不回来）返回 null
+  Future<String?> _uploadLocalRef(CloudBridge bridge, String ref) async {
+    if (ref.isEmpty || OssRef.isRemote(ref)) return null;
+    final Uint8List? bytes;
+    try {
+      bytes = await _media.read(ref);
+    } catch (error) {
+      _lastError = '照片读取失败：$error';
+      return null;
+    }
+    if (bytes == null) return null;
+    final name = mediaFileName(ref);
+    try {
+      final remote = await bridge.uploadMedia(
+        bytes,
+        name: name.contains('.') ? name : 'photo.jpg',
+      );
+      return remote;
+    } catch (error) {
+      _lastError = '照片上传云端失败：$error';
+      return null;
+    }
+  }
+
+  /// 还有几张照片只存在本机（换设备前必须传上去），给界面做提示用
+  int get localOnlyPhotoCount => _photos
+      .where(
+        (photo) =>
+            !OssRef.isRemote(photo.imageRef) ||
+            !OssRef.isRemote(photo.thumbRef),
+      )
+      .length;
+
+  /// 本机写过的照片文件；传上云端之后就不再需要它们了
+  static const String _localMediaKey = 'zudun.local_media';
+
+  Future<void> _rememberLocalMedia(String ref) async {
+    if (ref.isEmpty) return;
+    final list = _localMediaRefs()..add(ref);
+    await _store.setString(_localMediaKey, jsonEncode(list));
+  }
+
+  List<String> _localMediaRefs() {
+    final raw = _store.getString(_localMediaKey);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return [];
+      return [for (final item in decoded) '$item'];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// 同步成功后清理本机照片文件：只删「已经没有任何记录再引用」的那些。
+  ///
+  /// 判定标准就是记录本身 —— 记录还指向本机引用的（没传成功、或游客态）一律
+  /// 留着，否则照片就真的没了。返回删掉的文件数。
+  Future<int> releaseLocalMedia() async {
+    final pending = _localMediaRefs();
+    if (pending.isEmpty) return 0;
+    final inUse = <String>{
+      for (final photo in _photos) ...[photo.imageRef, photo.thumbRef],
+    };
+    final left = <String>[];
+    var removed = 0;
+    for (final ref in pending) {
+      if (inUse.contains(ref)) {
+        left.add(ref);
+        continue;
+      }
+      try {
+        await _media.delete(ref);
+        removed++;
+      } catch (_) {
+        left.add(ref); // 删不掉就留着，下次再试
+      }
+    }
+    await _store.setString(_localMediaKey, jsonEncode(left));
+    _mediaBytes = await _media.usedBytes();
+    return removed;
   }
 
   /// 游客态写过的图片文件（下次以游客身份启动时删掉，见 [purgeGuestMedia]）

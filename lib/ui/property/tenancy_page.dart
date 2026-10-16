@@ -145,46 +145,6 @@ Widget _coverOverlay(Property property, int daysLeft) => Stack(
   ],
 );
 
-/// 房源卡片的固定封面（由 `tool/generate_property_cover.dart` 生成）。
-/// 下面压一层自下而上的暗角：水印文字是白的，底图不能太亮。
-class _DefaultCover extends StatelessWidget {
-  const _DefaultCover({required this.watermark, required this.overlay});
-
-  final List<String> watermark;
-  final Widget overlay;
-
-  static const String asset = 'assets/images/property_cover.png';
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        Image.asset(asset, fit: BoxFit.cover),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.bottomCenter,
-              end: Alignment.topCenter,
-              colors: [
-                Z.scrimNavy,
-                Z.scrimNavy.withValues(alpha: 0.35),
-                Colors.transparent,
-              ],
-              stops: const [0, 0.55, 1],
-            ),
-          ),
-        ),
-        Align(
-          alignment: Alignment.bottomLeft,
-          child: ZWatermarkBar(lines: watermark),
-        ),
-        overlay,
-      ],
-    );
-  }
-}
-
 /// 左上角的房源切换器：显示当前在租这套的名字，点一下换房。
 /// 只有一套在租时不摆下拉箭头（没得换），历史入口仍留在右侧。
 class _PropertySwitcher extends StatelessWidget {
@@ -210,35 +170,41 @@ class _PropertySwitcher extends StatelessWidget {
         children: [
           Icon(Icons.home_outlined, size: ZIcon.m, color: Z.ink3),
           const SizedBox(width: 7),
-          Flexible(
-            child: InkWell(
-              onTap: canSwitch ? onTap : null,
-              borderRadius: BorderRadius.circular(100),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Flexible(
-                    child: Text(
-                      name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: ZText.title4,
+          // 名字这格要「吃掉中间的全部空间」：以前用 Flexible + Spacer，
+          // Flexible 是宽松的，它没占满的那份额度留在 Spacer 右边，
+          // 把「历史 N 套」挤到离右边缘一小截的位置
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: InkWell(
+                onTap: canSwitch ? onTap : null,
+                borderRadius: BorderRadius.circular(100),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: ZText.title4,
+                      ),
                     ),
-                  ),
-                  if (canSwitch) ...[
-                    const SizedBox(width: 2),
-                    Icon(
-                      Icons.keyboard_arrow_down_rounded,
-                      size: ZIcon.m,
-                      color: Z.brand,
-                    ),
+                    if (canSwitch) ...[
+                      const SizedBox(width: 2),
+                      Icon(
+                        Icons.keyboard_arrow_down_rounded,
+                        size: ZIcon.m,
+                        color: Z.brand,
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ),
-          const Spacer(),
-          if (historyLabel != null && onHistory != null)
+          if (historyLabel != null && onHistory != null) ...[
+            const SizedBox(width: 10),
             InkWell(
               onTap: onHistory,
               child: Row(
@@ -248,6 +214,7 @@ class _PropertySwitcher extends StatelessWidget {
                 ],
               ),
             ),
+          ],
         ],
       ),
     );
@@ -529,7 +496,7 @@ class _CurrentCard extends StatelessWidget {
             height: 108,
             // 封面固定用内置底图：有没有照片都显示这张，
             // 房源名与地址由底图上的水印负责（和 ZPhoto 的水印同一套样式）
-            child: _DefaultCover(
+            child: ZDefaultCover(
               watermark: [property.name, property.address],
               overlay: _coverOverlay(property, daysLeft),
             ),

@@ -141,14 +141,9 @@ class _ComparePageState extends State<ComparePage> {
           ZAppBar(
             leading: const ZBackButton(),
             title: '退租对比',
-            actions: [
-              ZIconButton(
-                icon: Icons.ios_share,
-                tooltip: '导出报告',
-                onTap: () => _export(context, repository, property, rooms),
-              ),
-            ],
           ),
+          // tab 与头部之间留出呼吸感，别贴着标题（和维权指南一致）
+          const SizedBox(height: 10),
           ZChips<String>(
             options: rooms,
             value: current,

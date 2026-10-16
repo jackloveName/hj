@@ -17,9 +17,11 @@ String fmtDate(DateTime d) => '${d.year}-${_p2(d.month)}-${_p2(d.day)}';
 /// 03-01
 String fmtMonthDay(DateTime d) => '${_p2(d.month)}-${_p2(d.day)}';
 
+/// 10:24
+String fmtTime(DateTime d) => '${_p2(d.hour)}:${_p2(d.minute)}';
+
 /// 2026-03-01 10:24
-String fmtDateTime(DateTime d) =>
-    '${fmtDate(d)} ${_p2(d.hour)}:${_p2(d.minute)}';
+String fmtDateTime(DateTime d) => '${fmtDate(d)} ${fmtTime(d)}';
 
 /// 2026年3月1日
 String fmtDateCn(DateTime d) => '${d.year}年${d.month}月${d.day}日';

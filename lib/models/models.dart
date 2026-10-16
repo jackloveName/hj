@@ -22,6 +22,29 @@ double _double(Object? raw, [double fallback = 0]) {
   return fallback;
 }
 
+/// 可空数字：没写 / 空串 / 解析不出来都是 null。
+///
+/// 用来区分「填了 0」和「还没填」—— 入住时的表底数就是这种：
+/// 填了 0 是「表本来就是 0」，没填是「还没抄」，两者不能混。
+double? _optionalDouble(Object? raw) {
+  if (raw == null) return null;
+  if (raw is num) return raw.toDouble();
+  return double.tryParse(raw.toString().trim());
+}
+
+/// [ContractInfo.copyWith] 的哨兵值：区分「参数没传」（保持原值）和
+/// 「传了 null」（把这一项清空）。三项表底数是可空的，用户把输入框清空时
+/// 得能真的清掉 —— 直接写 `??` 的话 null 会被当成「不改」。
+const Object _unset = Object();
+
+/// [ContractInfo.copyWith] 里的表底数取值：
+/// 没传 → 保持原值；传了 null → 清空；传了数（int / double 都行）→ 存成 double。
+double? _readingValue(Object? value, double? current) {
+  if (identical(value, _unset)) return current;
+  if (value == null) return null;
+  return (value as num).toDouble();
+}
+
 int _int(Object? raw, [int fallback = 0]) {
   if (raw is num) return raw.toInt();
   if (raw is String) return int.tryParse(raw) ?? fallback;
@@ -196,8 +219,10 @@ class ContractInfo {
     this.renewalTerms = '',
     this.specialTerms = '',
     this.contractPhotoRefs = const [],
-    this.area = '',
-    this.layout = '',
+    this.hasGasMeter = false,
+    this.moveInElectricity,
+    this.moveInWater,
+    this.moveInGas,
   });
 
   final double monthlyRent;
@@ -208,6 +233,18 @@ class ContractInfo {
   final int rentDueDay;
   final int minLeaseMonths;
 
+  /// 这套房有没有燃气表。默认「没有」—— 家里没燃气表却逼着填一个燃气表底数
+  /// （填 0 也是假的）只会让待办永远消不掉。
+  /// 它同时决定抄表录入里燃气那一项要不要开着。
+  final bool hasGasMeter;
+
+  /// 入住时的表底数（水 m³ / 电 kWh / 燃气 m³）。
+  /// 留空表示还没抄：抄表录入的首月用量要靠它当基准，
+  /// 缺了会在首页待办里提醒补填。旧数据没有这三项，读出来是 null。
+  final double? moveInElectricity;
+  final double? moveInWater;
+  final double? moveInGas;
+
   /// 退租需要提前多少天通知房东
   final int noticeDays;
 
@@ -217,8 +254,6 @@ class ContractInfo {
   final String renewalTerms;
   final String specialTerms;
   final List<String> contractPhotoRefs;
-  final String area;
-  final String layout;
 
   static const List<String> paymentMethods = [
     '押一付一',
@@ -231,10 +266,14 @@ class ContractInfo {
     '其他',
   ];
 
+  /// 合同一共几期（含首尾月）：和按租期生成的租金计划期数一致 ——
+  /// 2026-03-01 签到 2026-12-31 是 10 期。
+  /// 以前用纯月份差，会少算一期（向导里那句「共 N 期」当时也跟着错）
   int get totalMonths {
     final months =
         (contractEnd.year - moveInDate.year) * 12 +
-        (contractEnd.month - moveInDate.month);
+        (contractEnd.month - moveInDate.month) +
+        1;
     return months <= 0 ? 1 : months;
   }
 
@@ -259,8 +298,11 @@ class ContractInfo {
     String? renewalTerms,
     String? specialTerms,
     List<String>? contractPhotoRefs,
-    String? area,
-    String? layout,
+    bool? hasGasMeter,
+    // 传 null 表示清空这一项（见 [_unset]）
+    Object? moveInElectricity = _unset,
+    Object? moveInWater = _unset,
+    Object? moveInGas = _unset,
   }) => ContractInfo(
     monthlyRent: monthlyRent ?? this.monthlyRent,
     deposit: deposit ?? this.deposit,
@@ -275,8 +317,10 @@ class ContractInfo {
     renewalTerms: renewalTerms ?? this.renewalTerms,
     specialTerms: specialTerms ?? this.specialTerms,
     contractPhotoRefs: contractPhotoRefs ?? this.contractPhotoRefs,
-    area: area ?? this.area,
-    layout: layout ?? this.layout,
+    hasGasMeter: hasGasMeter ?? this.hasGasMeter,
+    moveInElectricity: _readingValue(moveInElectricity, this.moveInElectricity),
+    moveInWater: _readingValue(moveInWater, this.moveInWater),
+    moveInGas: _readingValue(moveInGas, this.moveInGas),
   );
 
   Map<String, dynamic> toJson() => {
@@ -293,8 +337,10 @@ class ContractInfo {
     'renewalTerms': renewalTerms,
     'specialTerms': specialTerms,
     'contractPhotoRefs': contractPhotoRefs,
-    'area': area,
-    'layout': layout,
+    'hasGasMeter': hasGasMeter,
+    'moveInElectricity': moveInElectricity,
+    'moveInWater': moveInWater,
+    'moveInGas': moveInGas,
   };
 
   factory ContractInfo.fromJson(Map<String, dynamic> json) => ContractInfo(
@@ -314,8 +360,10 @@ class ContractInfo {
     renewalTerms: _string(json['renewalTerms']),
     specialTerms: _string(json['specialTerms']),
     contractPhotoRefs: _strings(json['contractPhotoRefs']),
-    area: _string(json['area']),
-    layout: _string(json['layout']),
+    hasGasMeter: _bool(json['hasGasMeter']),
+    moveInElectricity: _optionalDouble(json['moveInElectricity']),
+    moveInWater: _optionalDouble(json['moveInWater']),
+    moveInGas: _optionalDouble(json['moveInGas']),
   );
 }
 
@@ -347,6 +395,8 @@ class DepositInfo {
     this.returnedAmount = 0,
     this.returnedDate,
     this.disputeNote = '',
+    this.handoverDone = false,
+    this.handoverNote = '',
     this.logs = const [],
   });
 
@@ -356,6 +406,13 @@ class DepositInfo {
   final double returnedAmount;
   final DateTime? returnedDate;
   final String disputeNote;
+
+  /// 与房东的退租对接是否已经谈妥（钥匙交还、水电燃气结清、退租验收）
+  final bool handoverDone;
+
+  /// 交接时的备注：遗留问题、口头约定
+  final String handoverNote;
+
   final List<DepositLog> logs;
 
   DepositInfo copyWith({
@@ -365,6 +422,8 @@ class DepositInfo {
     double? returnedAmount,
     DateTime? returnedDate,
     String? disputeNote,
+    bool? handoverDone,
+    String? handoverNote,
     List<DepositLog>? logs,
   }) => DepositInfo(
     status: status ?? this.status,
@@ -373,6 +432,8 @@ class DepositInfo {
     returnedAmount: returnedAmount ?? this.returnedAmount,
     returnedDate: returnedDate ?? this.returnedDate,
     disputeNote: disputeNote ?? this.disputeNote,
+    handoverDone: handoverDone ?? this.handoverDone,
+    handoverNote: handoverNote ?? this.handoverNote,
     logs: logs ?? this.logs,
   );
 
@@ -383,6 +444,8 @@ class DepositInfo {
     'returnedAmount': returnedAmount,
     'returnedDate': returnedDate?.toIso8601String(),
     'disputeNote': disputeNote,
+    'handoverDone': handoverDone,
+    'handoverNote': handoverNote,
     'logs': logs.map((e) => e.toJson()).toList(),
   };
 
@@ -395,6 +458,8 @@ class DepositInfo {
         ? null
         : parseDate(_string(json['returnedDate'])),
     disputeNote: _string(json['disputeNote']),
+    handoverDone: _bool(json['handoverDone']),
+    handoverNote: _string(json['handoverNote']),
     logs: _maps(json['logs']).map(DepositLog.fromJson).toList(),
   );
 }
@@ -1351,7 +1416,8 @@ enum ReminderKind {
   contractExpire('合同到期'),
   utilityReading('抄表提醒'),
   depositReturn('押金退还'),
-  photoMissing('取证待办');
+  photoMissing('取证待办'),
+  moveInReading('表底数待补');
 
   const ReminderKind(this.label);
   final String label;
