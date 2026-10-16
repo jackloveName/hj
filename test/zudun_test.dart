@@ -8385,23 +8385,40 @@ void groupWidgets() {
       serverPayload,
       platform: TargetPlatform.android,
     );
-    expect(android?.version, '1.0.1', reason: 'Android 读 androidVersion');
-    expect(android?.url, '', reason: '没下发 android 下载地址就留空');
+    expect(
+      android,
+      isNull,
+      reason: '安卓那组是 updateType=0（后台关掉了更新提示），什么都不该弹',
+    );
+    final androidOn = parseAppUpdate({
+      ...serverPayload,
+      'androidUpdateType': 1,
+    }, platform: TargetPlatform.android);
+    expect(androidOn?.version, '1.0.1', reason: 'Android 读 androidVersion');
+    expect(androidOn?.url, '', reason: '没下发 android 下载地址就留空');
     expect(
       parseAppUpdate({
         ...serverPayload,
-        'iosUpdateType': 2,
+        'iosUpdateType': 0,
+      }, platform: TargetPlatform.iOS),
+      isNull,
+      reason: '后台把更新提示关掉（updateType=0）就不再弹，哪怕版本更高',
+    );
+    expect(
+      parseAppUpdate({
+        ...serverPayload,
+        'iosUpdateType': 1,
       }, platform: TargetPlatform.iOS)?.force,
-      isTrue,
-      reason: 'updateType=2 才算强制更新',
+      isFalse,
+      reason: '平台只定义 0/1：1 是「提示更新」，不锁用户',
     );
 
     // 后台还填着占位链接时：当「没有下载地址」处理，
-    // 弹窗就不摆「立即更新」，不会把用户送去百度
+    // 弹窗就不摆「立即更新」，不会把用户送去无关站点
     final placeholder = parseAppUpdate({
       ...serverPayload,
-      'iosAppDownloadUrl': '',
-      'iosUpdateType': 2,
+      'iosAppDownloadUrl': 'https://example.com/app',
+      'force': true,
     }, platform: TargetPlatform.iOS);
     expect(placeholder?.url, '', reason: '占位域名当没填');
     expect(placeholder?.force, isTrue, reason: '强制标记本身还是要认');

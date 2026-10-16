@@ -1,21 +1,45 @@
-// 生成「租盾」应用图标与各平台所需尺寸。
+// 生成应用图标与各平台所需尺寸。
 //
-// 为什么用代码画：图标是几何图形（盾牌 + 房子），代码画可复现、任意尺寸都清晰，
-// 也方便日后改色。图形按 4 倍超采样再缩小，边缘自带抗锯齿。
+// 图标美术稿是设计给的位图（默认 assets/icon/app_icon_source.jpg），这个脚本只做
+// 两件事：按各平台要求的尺寸缩放、把 iOS 上架图去掉 alpha 通道。
+// （早期版本是用代码画盾牌图形的，换成美术稿之后那段绘制代码就删了。）
 //
-// 运行：dart run tool/generate_app_icons.dart
+// 注意：美术稿可能是 JPEG，哪怕扩展名写成 .png —— 一律用 image 包解码，
+// 输出统一写成真 PNG。
+//
+// 运行：dart run tool/generate_app_icons.dart [源图路径]
+// 产物：
+//   ios/Runner/Assets.xcassets/AppIcon.appiconset/   ← 上架用，15 个尺寸
+//   android/app/src/main/res/mipmap-*/               ← 仅本机调试用
+//   web/icons/、web/favicon.png                      ← PWA / 网页版
+//   assets/icon/app_icon_1024*.png                   ← 预览 / 设计稿素材
 import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:image/image.dart' as img;
 
-// 品牌渐变（与 lib/theme/tokens.dart 的 Z.logoGradient 一致）
-const int _topR = 0x4E, _topG = 0x86, _topB = 0xFF; // #4E86FF
-const int _botR = 0x17, _botG = 0x40, _botB = 0xB8; // #1740B8
-const int _houseR = 0x11, _houseG = 0x32, _houseB = 0x7F; // #11327F
+/// 美术稿：正方形，越大越好（现在这份是 2048×2048）
+const String _defaultSource = 'assets/icon/app_icon_source.jpg';
 
-void main() {
-  // Android：传统图标（5 档）+ 自适应图标前景
+void main(List<String> args) {
+  final sourcePath = args.isEmpty ? _defaultSource : args.first;
+  final file = File(sourcePath);
+  if (!file.existsSync()) {
+    stderr.writeln('找不到图标源图：$sourcePath');
+    exit(1);
+  }
+  final decoded = img.decodeImage(file.readAsBytesSync());
+  if (decoded == null) {
+    stderr.writeln('源图解析失败（不是图片，或者格式不支持）：$sourcePath');
+    exit(1);
+  }
+  if (decoded.width != decoded.height) {
+    stderr.writeln('图标源图必须是正方形，当前是 ${decoded.width}x${decoded.height}');
+    exit(1);
+  }
+  stdout.writeln('源图 $sourcePath（${decoded.width}x${decoded.height}）');
+
+  // Android：传统图标（5 档）+ 自适应图标前景（留白交给背景层）
   const androidSizes = {
     'mdpi': 48,
     'hdpi': 72,
@@ -24,16 +48,19 @@ void main() {
     'xxxhdpi': 192,
   };
   androidSizes.forEach((density, size) {
-    _write('android/app/src/main/res/mipmap-$density/ic_launcher.png',
-        _icon(size));
-    // 自适应图标：前景只画盾牌，四周留白交给背景层
+    _write(
+      'android/app/src/main/res/mipmap-$density/ic_launcher.png',
+      _scaled(decoded, size),
+    );
     _write(
       'android/app/src/main/res/mipmap-$density/ic_launcher_foreground.png',
-      _shapeOnly(size, scale: 0.42),
+      _padded(decoded, size, scale: 0.62),
     );
   });
 
-  // iOS：整套 AppIcon（含 1024 上架图；iOS 不接受透明，底色铺满）
+  // iOS：整套 AppIcon（含 1024 上架图）。
+  // 上架硬要求：图标**不能带 alpha 通道**，否则上传报
+  // "Invalid Image … can't have an alpha channel"，所以转成 3 通道再写。
   const iosIcons = {
     'Icon-App-20x20@1x.png': 20,
     'Icon-App-20x20@2x.png': 40,
@@ -52,145 +79,67 @@ void main() {
     'Icon-App-1024x1024@1x.png': 1024,
   };
   iosIcons.forEach((name, size) {
-    // iOS 上架硬要求：App 图标**不能带 alpha 通道**（否则上传报
-    // "Invalid Image … can't have an alpha channel"），所以转成 3 通道再写。
-    // 图标底本来就是全不透明的渐变，去 alpha 不会改变外观。
     _write(
       'ios/Runner/Assets.xcassets/AppIcon.appiconset/$name',
-      _icon(size).convert(numChannels: 3),
+      _scaled(decoded, size).convert(numChannels: 3),
     );
   });
 
-  // Web：PWA 图标（maskable 要留安全边距）+ favicon
-  _write('web/icons/Icon-192.png', _icon(192));
-  _write('web/icons/Icon-512.png', _icon(512));
-  _write('web/icons/Icon-maskable-192.png', _icon(192, scale: 0.5));
-  _write('web/icons/Icon-maskable-512.png', _icon(512, scale: 0.5));
-  _write('web/favicon.png', _icon(64));
+  // Web：PWA 图标（maskable 也按满幅给 —— 美术稿四周本来就是蓝底，
+  // 被遮罩裁掉边缘之后图形仍然完整）+ favicon
+  _write('web/icons/Icon-192.png', _scaled(decoded, 192));
+  _write('web/icons/Icon-512.png', _scaled(decoded, 512));
+  _write('web/icons/Icon-maskable-192.png', _scaled(decoded, 192));
+  _write('web/icons/Icon-maskable-512.png', _scaled(decoded, 512));
+  _write('web/favicon.png', _scaled(decoded, 64));
 
-  // 主图与圆角版（给预览 / 设计稿用）
-  _write('assets/icon/app_icon_1024.png', _icon(1024));
-  _write('assets/icon/app_icon_1024_rounded.png', _icon(1024, radius: 0.22));
-
-  _selfCheck(_icon(1024));
-}
-
-/// 完整图标：品牌渐变底 + 白色盾牌 + 盾内房子
-img.Image _icon(int size, {double radius = 0, double scale = 0.66}) {
-  final background = _gradient(size);
-  if (radius > 0) _roundCorners(background, radius);
-  final shape = _shapeOnly(size, scale: scale);
-  return img.compositeImage(
-    background,
-    shape,
-    blend: img.BlendMode.alpha,
-    linearBlend: true,
+  // 预览 / 设计稿素材（这两张不进安装包：pubspec 没有声明 assets/icon/）
+  _write('assets/icon/app_icon_1024.png', _scaled(decoded, 1024));
+  _write(
+    'assets/icon/app_icon_1024_rounded.png',
+    _rounded(_scaled(decoded, 1024), 0.22),
   );
+
+  _selfCheck(decoded, iosIcons);
 }
 
-/// 只要图形（透明底）：放 4 倍画再缩回来，边缘就顺了
-img.Image _shapeOnly(int size, {required double scale}) {
-  final factor = size <= 256 ? 4 : 2;
-  final big = _drawShape(size * factor, scale);
+/// 缩放：先逐级折半再收尾，避免 2048 → 20 一步缩出锯齿
+img.Image _scaled(img.Image source, int size) {
+  var current = source;
+  while (current.width >= size * 2) {
+    current = img.copyResize(
+      current,
+      width: current.width ~/ 2,
+      height: current.height ~/ 2,
+      interpolation: img.Interpolation.cubic,
+    );
+  }
+  if (current.width == size) return current;
   return img.copyResize(
-    big,
+    current,
     width: size,
     height: size,
     interpolation: img.Interpolation.cubic,
   );
 }
 
-/// 品牌渐变底
-img.Image _gradient(int size) {
-  final image = img.Image(width: size, height: size, numChannels: 4);
-  for (var y = 0; y < size; y++) {
-    for (var x = 0; x < size; x++) {
-      final t = ((x / size) * 0.35 + (y / size) * 0.65).clamp(0.0, 1.0);
-      image.setPixelRgba(
-        x,
-        y,
-        _lerp(_topR, _botR, t).round(),
-        _lerp(_topG, _botG, t).round(),
-        _lerp(_topB, _botB, t).round(),
-        255,
-      );
-    }
-  }
-  return image;
+/// 缩到 [scale] 大小、放在透明底正中（自适应图标前景这类要留边距的场合）
+img.Image _padded(img.Image source, int size, {required double scale}) {
+  final canvas = img.Image(width: size, height: size, numChannels: 4);
+  img.fill(canvas, color: img.ColorRgba8(0, 0, 0, 0));
+  final inner = math.max(1, (size * scale).round());
+  return img.compositeImage(
+    canvas,
+    _scaled(source, inner),
+    dstX: (size - inner) ~/ 2,
+    dstY: (size - inner) ~/ 2,
+    blend: img.BlendMode.alpha,
+    linearBlend: true,
+  );
 }
 
-/// 透明底上画白色盾牌 + 深蓝房子 + 白门
-img.Image _drawShape(int size, double scale) {
-  final image = img.Image(width: size, height: size, numChannels: 4);
-  img.fill(image, color: img.ColorRgba8(0, 0, 0, 0));
-
-  final box = size * scale;
-  final left = (size - box) / 2;
-  final top = (size - box) / 2;
-  img.Point p(double x, double y) =>
-      img.Point(left + box * x, top + box * y);
-
-  // 盾牌轮廓：上部两角圆滑，两侧直下，底部收成尖角
-  final shield = <img.Point>[];
-  for (var i = 0; i <= 12; i++) {
-    final t = i / 12;
-    shield.add(
-      p(0.5 - 0.44 * math.sin(t * math.pi / 2), 0.06 + 0.10 * math.cos(t * math.pi / 2)),
-    );
-  }
-  for (var i = 0; i <= 12; i++) {
-    final t = i / 12;
-    shield.add(
-      p(0.5 + 0.44 * math.sin(t * math.pi / 2), 0.16 - 0.10 * math.cos(t * math.pi / 2)),
-    );
-  }
-  shield.add(p(0.94, 0.60));
-  for (var i = 1; i <= 14; i++) {
-    final t = i / 14;
-    shield.add(p(0.94 - 0.44 * math.sin(t * math.pi / 2), 0.60 + 0.36 * math.sin(t * math.pi / 2)));
-  }
-  for (var i = 14; i >= 0; i--) {
-    final t = i / 14;
-    shield.add(p(0.06 + 0.44 * (1 - math.sin(t * math.pi / 2)), 0.60 + 0.36 * math.sin(t * math.pi / 2)));
-  }
-  img.fillPolygon(
-    image,
-    vertices: shield,
-    color: img.ColorRgba8(255, 255, 255, 255),
-  );
-
-  // 房子：屋顶（三角）+ 房身，深蓝
-  img.fillPolygon(
-    image,
-    vertices: [
-      p(0.50, 0.33),
-      p(0.25, 0.53),
-      p(0.75, 0.53),
-    ],
-    color: img.ColorRgba8(_houseR, _houseG, _houseB, 255),
-  );
-  img.fillRect(
-    image,
-    x1: (left + box * 0.33).round(),
-    y1: (top + box * 0.51).round(),
-    x2: (left + box * 0.67).round(),
-    y2: (top + box * 0.78).round(),
-    color: img.ColorRgba8(_houseR, _houseG, _houseB, 255),
-  );
-  // 门：白色小方块，小尺寸下也能认出是房子
-  img.fillRect(
-    image,
-    x1: (left + box * 0.45).round(),
-    y1: (top + box * 0.61).round(),
-    x2: (left + box * 0.55).round(),
-    y2: (top + box * 0.78).round(),
-    color: img.ColorRgba8(255, 255, 255, 255),
-  );
-  return image;
-}
-
-/// 圆角（用于预览版主图；上架图标保持方角由系统裁切）
-void _roundCorners(img.Image image, double radius) {
+/// 圆角（只给预览素材用；上架图标保持方角，圆角由系统裁切）
+img.Image _rounded(img.Image image, double radius) {
   final size = image.width;
   final r = size * radius;
   for (var y = 0; y < size; y++) {
@@ -203,9 +152,8 @@ void _roundCorners(img.Image image, double radius) {
       }
     }
   }
+  return image;
 }
-
-double _lerp(num a, num b, double t) => a + (b - a) * t;
 
 void _write(String path, img.Image image) {
   final file = File(path)..parent.createSync(recursive: true);
@@ -213,21 +161,25 @@ void _write(String path, img.Image image) {
   stdout.writeln('写入 $path (${image.width}x${image.height})');
 }
 
-/// 自检：盾牌中心是白的、四角是品牌蓝、房子是深蓝
-void _selfCheck(img.Image image) {
-  final center = image.getPixel(image.width ~/ 2, (image.height * 0.72).round());
-  final corner = image.getPixel(6, 6);
-  final house = image.getPixel(image.width ~/ 2, (image.height * 0.45).round());
+/// 自检：每个 iOS 尺寸都要对得上，且**不能带 alpha 通道**（上架硬要求）
+void _selfCheck(img.Image source, Map<String, int> iosIcons) {
+  const dir = 'ios/Runner/Assets.xcassets/AppIcon.appiconset';
+  iosIcons.forEach((name, size) {
+    final decoded = img.decodePng(File('$dir/$name').readAsBytesSync());
+    if (decoded == null) throw StateError('$name 写出来不是合法的 PNG');
+    if (decoded.width != size || decoded.height != size) {
+      throw StateError(
+        '$name 尺寸不对：${decoded.width}x${decoded.height}，应该是 $size',
+      );
+    }
+    if (decoded.numChannels != 3) {
+      throw StateError(
+        '$name 带了 alpha 通道（${decoded.numChannels} 通道），iOS 上架会被拒',
+      );
+    }
+  });
   stdout.writeln(
-    '自检：房子 $house，盾牌下缘 $center，左上角 $corner',
+    '自检通过：iOS ${iosIcons.length} 个尺寸都对、都没有 alpha 通道'
+    '（源图 ${source.width}x${source.height}）',
   );
-  if (house.b < 90 || house.r > 90) {
-    throw StateError('盾牌里的房子应该是深蓝（拿到 $house）');
-  }
-  if (center.r < 200 || center.g < 200 || center.b < 200) {
-    throw StateError('盾牌主体应该是白色（拿到 $center）');
-  }
-  if (corner.b < 150 || corner.r > 120) {
-    throw StateError('四角应该是品牌蓝（拿到 $corner）');
-  }
 }

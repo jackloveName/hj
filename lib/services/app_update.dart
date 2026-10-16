@@ -56,10 +56,18 @@ List<int> _parts(String value) => [
 
 /// 解析服务端配置。形态不固定（JSON 字符串 / `{paramValue: ...}` / 直接对象），
 /// 尽量宽容地取版本号、更新说明与下载地址；取不到版本号视为「没有更新」。
+///
+/// 平台后台的更新开关（`iosUpdateType` / `androidUpdateType`，口径由平台确认）：
+/// **0 = 不更新**（后台关掉了，即使版本更高也不弹）、**1 = 提示更新**；
+/// 字段缺失时按「提示更新」走（兼容没有这个开关的写法）。
+/// 平台只定义了 0 和 1，所以这里不把任何非 0 值当「强制更新」——
+/// 强制只认配置里写明的 `force` / `forceUpdate` 这类布尔字段。
 AppUpdateInfo? parseAppUpdate(Object? raw, {TargetPlatform? platform}) {
   final map = _unwrap(raw, 0);
   if (map == null) return null;
   final target = platform ?? defaultTargetPlatform;
+  final updateSwitch = _updateSwitchOf(map, target);
+  if (updateSwitch == 0) return null;
   final version = _string(map, _versionKeys(target));
   if (version == null || version.trim().isEmpty) return null;
   return AppUpdateInfo(
@@ -77,7 +85,7 @@ AppUpdateInfo? parseAppUpdate(Object? raw, {TargetPlatform? platform}) {
         ]) ??
         '',
     url: _usableUrl(_string(map, _urlKeys(target))),
-    force: _forceOf(map, target),
+    force: _bool(map, const ['force', 'forceUpdate', 'isForce', 'mustUpdate']),
   );
 }
 
@@ -110,8 +118,8 @@ String _usableUrl(String? raw) {
 /// 挑不到再退回通用字段（兼容别处下发的 `version` / `latestVersion` 这类写法）。
 List<String> _versionKeys(TargetPlatform platform) => [
   ...switch (platform) {
-    TargetPlatform.iOS => const ['iosAppVersion', 'iosVersion'],
-    TargetPlatform.android => const ['androidAppVersion', 'androidVersion'],
+    TargetPlatform.iOS => const ['iosAppVersion'],
+    TargetPlatform.android => const ['androidVersion', 'androidAppVersion'],
     _ => const <String>[],
   },
   'version',
@@ -123,16 +131,8 @@ List<String> _versionKeys(TargetPlatform platform) => [
 
 List<String> _urlKeys(TargetPlatform platform) => [
   ...switch (platform) {
-    TargetPlatform.iOS => const [
-      'iosAppDownloadUrl',
-      'iosDownloadUrl',
-      'iosUrl',
-    ],
-    TargetPlatform.android => const [
-      'androidAppDownloadUrl',
-      'androidDownloadUrl',
-      'androidUrl',
-    ],
+    TargetPlatform.iOS => const ['iosAppDownloadUrl'],
+    TargetPlatform.android => const ['androidAppDownloadUrl', 'androidUrl'],
     _ => const <String>[],
   },
   'url',
@@ -141,19 +141,23 @@ List<String> _urlKeys(TargetPlatform platform) => [
   'apkUrl',
 ];
 
-/// 强制更新：通用字段（`force` / `forceUpdate` …）算数；平台后台那套
-/// `iosUpdateType` / `androidUpdateType` 只在 **≥ 2** 时当强制
-/// （1 是「有新版本就提示」，弹窗可以关掉）。
-bool _forceOf(Map<String, dynamic> map, TargetPlatform platform) {
-  if (_bool(map, const ['force', 'forceUpdate', 'isForce', 'mustUpdate'])) {
-    return true;
-  }
+/// 平台后台的更新开关：0 = 不更新、1 = 提示更新；字段缺失返回 null
+/// （老写法 / 通用 payload 没有这个开关，按「提示更新」走）。
+int? _updateSwitchOf(Map<String, dynamic> map, TargetPlatform platform) {
   final keys = switch (platform) {
-    TargetPlatform.iOS => const ['iosUpdateType', 'iosForceUpdate'],
-    TargetPlatform.android => const ['androidUpdateType', 'androidForceUpdate'],
+    TargetPlatform.iOS => const ['iosUpdateType'],
+    TargetPlatform.android => const ['androidUpdateType'],
     _ => const <String>[],
   };
-  return _intOf(map, keys) >= 2;
+  for (final key in keys) {
+    final value = map[key];
+    if (value is num) return value.toInt();
+    if (value is String) {
+      final parsed = int.tryParse(value.trim());
+      if (parsed != null) return parsed;
+    }
+  }
+  return null;
 }
 
 Map<String, dynamic>? _unwrap(Object? raw, int depth) {
@@ -203,14 +207,3 @@ bool _bool(Map<String, dynamic> map, List<String> keys) {
   return false;
 }
 
-int _intOf(Map<String, dynamic> map, List<String> keys) {
-  for (final key in keys) {
-    final value = map[key];
-    if (value is num) return value.toInt();
-    if (value is String) {
-      final parsed = int.tryParse(value.trim());
-      if (parsed != null) return parsed;
-    }
-  }
-  return 0;
-}
