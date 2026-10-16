@@ -372,7 +372,7 @@ class _LoginPageState extends State<LoginPage> {
         const SizedBox(height: 8),
         Center(
           child: Text(
-            '不填手机号也能使用全部功能，数据只保存在这台设备；'
+            '不填手机号也能使用，数据只保存在这台设备；'
             '之后可在「我的 → 账号与同步」里登录同步。',
             textAlign: TextAlign.center,
             style: ZText.micro.copyWith(fontWeight: FontWeight.w400),
