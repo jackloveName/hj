@@ -6,6 +6,7 @@ import '../../models/models.dart';
 import '../../theme/tokens.dart';
 import '../../utils/format.dart';
 import '../evidence/evidence_rooms_page.dart';
+import '../expense/deposit_summary_card.dart';
 import '../expense/utility_page.dart';
 import '../kit.dart';
 import '../media.dart';
@@ -30,7 +31,7 @@ class HomePage extends StatelessWidget {
             ? _WelcomeEmpty(
                 onAdd: () => zPush(context, const PropertyEditPage()),
               )
-            : _AllEndedEmpty(historyCount: history.length),
+            : _AllEndedEmpty(properties: history),
       );
     }
 
@@ -106,36 +107,98 @@ class HomePage extends StatelessWidget {
 
 }
 
-/// 房子都退租了：提示开始新租约，同时保留历史记录入口
+/// 房子都退租了：这个阶段唯一还要盯的是押金，其次才是「开始新租约」。
+///
+/// 所以这里不再只摆一个空状态：顶上三件事按重要性排 —— 押金摘要（点进费用页
+/// 看每套情况）、新增租住、历史记录；流浪天数照旧摆在最后。
 class _AllEndedEmpty extends StatelessWidget {
-  const _AllEndedEmpty({required this.historyCount});
+  const _AllEndedEmpty({required this.properties});
 
-  final int historyCount;
+  final List<Property> properties;
 
   @override
   Widget build(BuildContext context) {
-    final days = context.watch<Repository>().wanderingDays;
-    return Column(
+    final repository = context.watch<Repository>();
+    final days = repository.wanderingDays;
+    final toExpense = ZTabSwitch.of(context);
+    // 按状态数「还没退到手」的套数（金额没填也算）
+    final pending = properties.where(depositNotBack).length;
+    // 历史里还可能有「纠纷中」的房子：那不算退租收尾，文案与待办都要跟着变
+    final disputes = properties
+        .where((property) => property.status == PropertyStatus.dispute)
+        .length;
+    final reminders = repository.reminders;
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 22, 16, 24),
       children: [
-        Expanded(
-          child: ZEmpty(
-            icon: Icons.key_off_outlined,
-            title: '现在的房子已经退租',
-            message: '押金还在等退还、或正在维权时，随时可以回看历史里的照片与报告。',
-            actionLabel: '新增一套租住',
-            onAction: () => zPush(context, const PropertyEditPage()),
+        // 流浪天数摆在页面最上面、居中一行：没有在租的房子时，
+        // 这是页面上唯一的「进度感」，别埋到最底下
+        Center(child: _WanderingLine(days: days)),
+        if (days > 0) const SizedBox(height: 14),
+        Center(
+          child: Container(
+            width: 62,
+            height: 62,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: Z.brandTint,
+              borderRadius: BorderRadius.circular(22),
+            ),
+            child: Icon(
+              disputes > 0 ? Icons.gavel_outlined : Icons.key_off_outlined,
+              size: 28,
+              color: Z.brand,
+            ),
           ),
         ),
-        // 房子都退租了也把流浪天数摆出来，别只有「我的」页能看到
-        _WanderingLine(days: days),
-        const SizedBox(height: 8),
-        Padding(
-          padding: const EdgeInsets.only(bottom: 24),
+        const SizedBox(height: 14),
+        Text(
+          disputes > 0 ? '有 $disputes 套房还在维权' : '现在的房子已经退租',
+          textAlign: TextAlign.center,
+          style: ZText.title3,
+        ),
+        const SizedBox(height: 5),
+        Text(
+          disputes > 0
+              ? '押金纠纷还没收尾：照片、合同、沟通记录都在，接着整理材料就行。'
+              : '照片、合同和报告都收进历史里了；押金还没到手就继续盯这一件事。',
+          textAlign: TextAlign.center,
+          style: ZText.caption.copyWith(height: 1.5),
+        ),
+        // 没有在租房源时首页原来一条待办都不摆，维权那条就没入口了 ——
+        // 这里的待办基本只剩「押金纠纷维权中」，正好补上
+        if (reminders.isNotEmpty) ...[
+          ZSectionTitle(
+            title: '待办提醒',
+            icon: Icons.notifications_none_rounded,
+            moreLabel: '${reminders.length} 项',
+            onMore: () => zPush(context, const ReminderListPage()),
+          ),
+          _ReminderCard(
+            reminders: reminders.take(3).toList(),
+            onTap: (item) => openReminder(context, item),
+          ),
+        ],
+        const SizedBox(height: 18),
+        DepositSummaryCard(
+          properties: properties,
+          actionLabel: pending > 1 ? '看每套的情况' : null,
+          onTap: toExpense == null ? null : () => toExpense(2),
+        ),
+        const SizedBox(height: 14),
+        ZButton(
+          label: '新增一套租住',
+          icon: Icons.add_rounded,
+          onTap: () => zPush(context, const PropertyEditPage()),
+        ),
+        const SizedBox(height: 10),
+        Center(
           child: TextButton.icon(
             onPressed: () => zPush(context, const HistoryPage()),
             icon: const Icon(Icons.history_rounded, size: 16, color: Z.brand),
             label: Text(
-              '查看历史租住 $historyCount 套',
+              '查看历史租住 ${properties.length} 套',
               style: ZText.label.copyWith(color: Z.brand),
             ),
           ),

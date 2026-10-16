@@ -5,6 +5,7 @@ import '../../data/repository.dart';
 import '../../models/models.dart';
 import '../../theme/tokens.dart';
 import '../../utils/format.dart';
+import '../expense/deposit_summary_card.dart';
 import '../kit.dart';
 import '../media.dart';
 import '../reminder_actions.dart';
@@ -50,7 +51,8 @@ class TenancyPage extends StatelessWidget {
                     children: [
                       // 左上角就是房源切换器（原来这里是「当前租住」四个字）
                       _PropertySwitcher(
-                        name: current?.name ?? '当前租住',
+                        // 没有在租的房子时别说「当前租住」，那是空话
+                        name: current?.name ?? '没有在租的房子',
                         // 只有一套在租时没得换，不摆下拉箭头也不响应点击
                         canSwitch: active.length > 1,
                         onTap: () => _switchCurrent(context, repository),
@@ -62,7 +64,7 @@ class TenancyPage extends StatelessWidget {
                       if (current != null)
                         _CurrentCard(property: current)
                       else
-                        const _NoCurrentCard(),
+                        _NoCurrentSection(properties: history),
                       const SizedBox(height: 18),
                       _AddButton(
                         label: '新增一套租住',
@@ -558,6 +560,10 @@ class _CurrentCard extends StatelessWidget {
                 _DepositFlow(
                   amount: property.contract.deposit,
                   status: property.deposit.status,
+                  returned: property.deposit.returnedAmount,
+                  deducted: property.deposit.deductedAmount,
+                  deductReason: property.deposit.deductReason,
+                  returnedDate: property.deposit.returnedDate,
                 ),
               ],
             ),
@@ -750,10 +756,24 @@ class _ContractTimeline extends StatelessWidget {
 
 /// 押金进度：已缴纳 → 退租结算 → 已退还，标出当前走到哪一步
 class _DepositFlow extends StatelessWidget {
-  const _DepositFlow({required this.amount, required this.status});
+  const _DepositFlow({
+    required this.amount,
+    required this.status,
+    required this.returned,
+    required this.deducted,
+    required this.deductReason,
+    required this.returnedDate,
+  });
 
   final double amount;
   final DepositStatus status;
+
+  /// 押金的实际结果：在「押金追踪」里改了状态、填了金额，这里也要看得见
+  /// （费用页操作完回租住页，一眼能看到退了多少、扣了多少）
+  final double returned;
+  final double deducted;
+  final String deductReason;
+  final DateTime? returnedDate;
 
   /// 当前第几步（0 起）；无需押金时整段步骤不画
   int? get _step => switch (status) {
@@ -783,6 +803,27 @@ class _DepositFlow extends StatelessWidget {
             ZTag(label: status.label, tone: status.tone),
           ],
         ),
+        if (status == DepositStatus.partiallyDeducted) ...[
+          const SizedBox(height: 4),
+          Text(
+            '已退 ${fmtMoney(returned)} · 被扣 ${fmtMoney(deducted)}'
+            '${deductReason.isEmpty ? '' : '（$deductReason）'}',
+            style: ZText.small.copyWith(fontSize: 11, height: 1.5),
+          ),
+        ] else if (status == DepositStatus.returned) ...[
+          const SizedBox(height: 4),
+          Text(
+            '已退 ${fmtMoney(returned > 0 ? returned : amount)}'
+            '${returnedDate == null ? '' : ' · ${fmtDate(returnedDate!)}'}',
+            style: ZText.small.copyWith(fontSize: 11, height: 1.5),
+          ),
+        ] else if (status == DepositStatus.toBeReturned) ...[
+          const SizedBox(height: 4),
+          Text(
+            '押金还在房东手里，退到手记得回来改成「已退还」',
+            style: ZText.small.copyWith(fontSize: 11, height: 1.5),
+          ),
+        ],
         if (step != null) ...[
           const SizedBox(height: 10),
           Row(
@@ -863,16 +904,23 @@ class _DepositFlow extends StatelessWidget {
 }
 
 /// 没有任何在租房子（都退租了）
-class _NoCurrentCard extends StatelessWidget {
-  const _NoCurrentCard();
+/// 没有在租的房子：一段说明 + 押金摘要。
+///
+/// 不再在这里重复摆「添加新的租住」按钮 —— 页面下方本来就有「新增一套租住」，
+/// 两个按钮挨着放只会让人犹豫点哪个。
+class _NoCurrentSection extends StatelessWidget {
+  const _NoCurrentSection({required this.properties});
+
+  final List<Property> properties;
 
   @override
   Widget build(BuildContext context) {
-    return ZCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    final toExpense = ZTabSwitch.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ZCard(
+          child: Row(
             children: [
               Container(
                 width: 34,
@@ -896,7 +944,7 @@ class _NoCurrentCard extends StatelessWidget {
                     Text('现在没有在租的房子', style: ZText.bodyStrong),
                     const SizedBox(height: 3),
                     Text(
-                      '需要维权时可以随时翻历史记录；开始新租约时再添加一套即可。',
+                      '需要维权时随时翻历史记录；开始新租约时再添加一套即可。',
                       style: ZText.caption.copyWith(height: 1.5),
                     ),
                   ],
@@ -904,15 +952,14 @@ class _NoCurrentCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          ZButton(
-            label: '添加新的租住',
-            icon: Icons.add_rounded,
-            height: 44,
-            onTap: () => zPush(context, const PropertyEditPage()),
-          ),
-        ],
-      ),
+        ),
+        const SizedBox(height: 10),
+        DepositSummaryCard(
+          properties: properties,
+          actionLabel: '看每套的情况',
+          onTap: toExpense == null ? null : () => toExpense(2),
+        ),
+      ],
     );
   }
 }

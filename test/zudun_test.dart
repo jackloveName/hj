@@ -1347,22 +1347,10 @@ void main() {
     });
   });
 
-  group('回归：押金状态与房源状态联动', () {
-    test('六种押金状态都有明确的房源状态', () {
-      expect(statusForDeposit(DepositStatus.none), PropertyStatus.active);
-      expect(statusForDeposit(DepositStatus.paid), PropertyStatus.active);
-      expect(
-        statusForDeposit(DepositStatus.toBeReturned),
-        PropertyStatus.ended,
-      );
-      expect(
-        statusForDeposit(DepositStatus.partiallyDeducted),
-        PropertyStatus.ended,
-      );
-      expect(statusForDeposit(DepositStatus.returned), PropertyStatus.ended);
-      expect(statusForDeposit(DepositStatus.inDispute), PropertyStatus.dispute);
-    });
-
+  // 押金状态**不再**映射房源状态（口径）：房源状态只有「完成退租」和
+  // 「去纠纷」两个出口，所以这里没有什么映射可测 —— 行为靠押金页的
+  // widget 用例守着（见「改押金状态不会把租住中的房子变成已退租」）。
+  group('回归：押金与退租日', () {
     test('退租日：优先退还日期，其次退租类日志，最后合同到期日', () {
       final base = buildProperty();
       // 没有任何退租记录 → 退回合同到期日
@@ -1395,40 +1383,6 @@ void main() {
       );
     });
 
-    test('押金只拽得动「租住中」的房子：已退租 / 纠纷中留在原地', () {
-      // 还在租的房子：押金改回「已缴纳 / 无押金」就是租住中，
-      // 改成待退还 / 已退还 / 部分扣除就是已退租，标记纠纷就是纠纷中
-      expect(
-        propertyStatusAfterDeposit(PropertyStatus.active, DepositStatus.paid),
-        PropertyStatus.active,
-      );
-      expect(
-        propertyStatusAfterDeposit(PropertyStatus.active, DepositStatus.none),
-        PropertyStatus.active,
-      );
-      expect(
-        propertyStatusAfterDeposit(
-          PropertyStatus.active,
-          DepositStatus.toBeReturned,
-        ),
-        PropertyStatus.ended,
-      );
-
-      // 已退租：押金继续往后走（退到手 / 部分扣除 / 转纠纷），房源还是已退租
-      for (final status in DepositStatus.values) {
-        expect(
-          propertyStatusAfterDeposit(PropertyStatus.ended, status),
-          PropertyStatus.ended,
-        );
-        // 纠纷中：押金改回「已缴纳 / 无押金」也不恢复在租，
-        // 改「待退还」也不会顺手变成已退租 ——
-        // 房源状态的出口只有退租页的「完成退租」和详情页的「去纠纷」
-        expect(
-          propertyStatusAfterDeposit(PropertyStatus.dispute, status),
-          PropertyStatus.dispute,
-        );
-      }
-    });
   });
 
   group('抄表：上月读数按自然月带入', () {
@@ -5138,6 +5092,48 @@ void groupWidgets() {
     );
   });
 
+  testWidgets('房源详情：已退租归档里几段卡片宽度一致且占满整行', (tester) async {
+    tester.view.physicalSize = const Size(390, 2000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      await repository.addProperty(buildHistoryProperty());
+    });
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(
+          theme: ZTheme.light(),
+          home: const PropertyDetailPage(propertyId: 'p2'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    // 卡片宽度以前是「内容撑出来的」：内容短的那几段会缩成一小块，
+    // 和内容长的段落对不齐（房东要求 112、维修记录 100 …）
+    double cardWidth(Finder anchor) => tester
+        .getRect(find.ancestor(of: anchor, matching: find.byType(ZCard)).first)
+        .width;
+    final widths = <String, double>{
+      '入住取证': cardWidth(find.textContaining('入住 0 张')),
+      '房东要求': cardWidth(find.textContaining('没有记录过要求')),
+      '维修记录': cardWidth(find.textContaining('没有维修记录')),
+      '沟通记录': cardWidth(find.textContaining('没有沟通留痕')),
+    };
+    for (final entry in widths.entries) {
+      expect(
+        entry.value,
+        closeTo(390 - 32, 0.5),
+        reason: '${entry.key} 的卡片要占满整行（去掉左右各 16 的内边距）：$widths',
+      );
+    }
+  });
+
   testWidgets('房源详情：去退租进退租页、去纠纷进标记纠纷页', (tester) async {
     tester.view.physicalSize = const Size(390, 1400);
     tester.view.devicePixelRatio = 1;
@@ -5311,12 +5307,19 @@ void groupWidgets() {
     );
     await tester.pumpAndSettle();
 
+    await tester.tap(find.text('完成退租'));
+    await tester.pumpAndSettle();
+    // 两件没做的事要在确认框里点出来（退完就只读了，再也补不了）
+    expect(find.textContaining('有 2 项还没做'), findsOneWidget);
+    expect(find.textContaining('退租取证'), findsWidgets);
+    expect(find.textContaining('最后一次抄表'), findsWidgets);
     await tester.runAsync(() async {
-      await tester.tap(find.text('完成退租'));
+      await tester.tap(find.text('仍要退租'));
       await tester.pump();
       await Future<void>.delayed(const Duration(milliseconds: 30));
       await tester.pump();
     });
+    await tester.pumpAndSettle();
 
     final ended = repository.propertyById('p1')!;
     expect(ended.status, PropertyStatus.ended, reason: '完成退租要把房源转成已退租');
@@ -5351,8 +5354,10 @@ void groupWidgets() {
     // 默认就停在「待退还」：页面要说清「没到手也能完成」
     expect(find.textContaining('还没到手也能先完成退租'), findsWidgets);
 
+    await tester.tap(find.text('完成退租'));
+    await tester.pumpAndSettle();
     await tester.runAsync(() async {
-      await tester.tap(find.text('完成退租'));
+      await tester.tap(find.text('仍要退租'));
       await tester.pump();
       await Future<void>.delayed(const Duration(milliseconds: 50));
       await tester.pump();
@@ -5845,6 +5850,423 @@ void groupWidgets() {
     );
   });
 
+  testWidgets('房源详情：删除房源要二次确认，删掉连照片一起走', (tester) async {
+    tester.view.physicalSize = const Size(390, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      await repository.addProperty(buildProperty());
+      await repository.addPhoto(
+        EvidencePhoto(
+          id: 'ph1',
+          propertyId: 'p1',
+          room: '客厅',
+          imageRef: 'media:p1/ph1.jpg',
+          thumbRef: 'media:p1/ph1.thumb.jpg',
+          timestamp: DateTime(2026, 10, 15),
+        ),
+      );
+    });
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(
+          theme: ZTheme.light(),
+          home: const PropertyDetailPage(propertyId: 'p1'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.text('删除这套房源'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('删除「翠屏里 3 栋 502」'), findsOneWidget);
+    expect(find.textContaining('1 张照片'), findsOneWidget, reason: '要说清会删掉什么');
+    expect(find.textContaining('先导出对比报告或照片包'), findsOneWidget);
+
+    // 点「再想想」什么都不动
+    await tester.tap(find.text('再想想'));
+    await tester.pumpAndSettle();
+    expect(repository.propertyById('p1'), isNotNull);
+
+    // 真的删：房源与照片一起没了
+    await tester.runAsync(() async {
+      await tester.tap(find.text('删除这套房源'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('删除'));
+      await tester.pump();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await tester.pump();
+    });
+    await tester.pumpAndSettle();
+    expect(repository.propertyById('p1'), isNull);
+    expect(repository.photosOf('p1'), isEmpty);
+  });
+
+  testWidgets('合同页：续租入口只改到期日与月租', (tester) async {
+    tester.view.physicalSize = const Size(390, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      await repository.addProperty(buildProperty());
+    });
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(
+          theme: ZTheme.light(),
+          home: const ContractPage(propertyId: 'p1'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.text('续租'));
+    await tester.pumpAndSettle();
+    expect(find.text('新的到期日'), findsOneWidget);
+    expect(find.text('月租（涨租就改这里）'), findsOneWidget);
+
+    // 到期日没往后改：拦住，不动数据
+    await tester.tap(find.text('保存续租'));
+    await tester.pumpAndSettle();
+    expect(
+      repository.propertyById('p1')!.contract.contractEnd,
+      DateTime(2026, 12, 31),
+    );
+  });
+
+  testWidgets('续租：改到期日后租金计划跟着补齐', (tester) async {
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      await repository.addProperty(buildProperty());
+    });
+
+    // 原合同 2026-03-01 → 2026-12-31：10 期
+    expect(repository.rentsOf('p1').length, 10);
+
+    await tester.runAsync(() async {
+      final property = repository.propertyById('p1')!;
+      await repository.updateProperty(
+        property.copyWith(
+          contract: property.contract.copyWith(
+            contractEnd: DateTime(2027, 3, 31),
+            monthlyRent: 3500,
+          ),
+        ),
+      );
+    });
+
+    final renewed = repository.propertyById('p1')!;
+    expect(renewed.contract.monthlyRent, 3500);
+    expect(
+      repository.rentsOf('p1').length,
+      13,
+      reason: '续到 2027-03 就是 13 期，多出来的月份自动补账单',
+    );
+    final months = repository.rentsOf('p1').map((rent) => rent.month).toList()
+      ..sort();
+    expect(months.last, monthKey(DateTime(2027, 3, 1)));
+  });
+
+  testWidgets('首页：押金金额没填也得说「还没退到手」，不能念结清', (tester) async {
+    tester.view.physicalSize = const Size(390, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      // 房子退了、押金状态是「待退还」，但合同里没填押金金额（0）
+      final base = buildProperty();
+      await repository.addProperty(
+        base.copyWith(
+          status: PropertyStatus.ended,
+          contract: base.contract.copyWith(deposit: 0),
+          deposit: base.deposit.copyWith(
+            status: DepositStatus.toBeReturned,
+            returnedAmount: 0,
+            returnedDate: null,
+          ),
+        ),
+      );
+    });
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(
+          theme: ZTheme.light(),
+          home: const Scaffold(body: HomePage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    // 状态说了算：没退到手就不许念「都结清了」；金额没填也别念「¥0」
+    expect(find.text('押金都结清了'), findsNothing);
+    expect(find.text('还没退到手的押金'), findsOneWidget);
+    expect(find.text('金额未填'), findsOneWidget);
+    expect(find.textContaining('1 套还没结清'), findsOneWidget);
+  });
+
+  testWidgets('首页：只有一套房在维权时，标题与待办都对', (tester) async {
+    tester.view.physicalSize = const Size(390, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      final base = buildProperty();
+      await repository.addProperty(
+        base.copyWith(
+          status: PropertyStatus.dispute,
+          deposit: base.deposit.copyWith(
+            status: DepositStatus.inDispute,
+            deductedAmount: 2000,
+            deductReason: '墙面划痕',
+          ),
+        ),
+      );
+    });
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(
+          theme: ZTheme.light(),
+          // 首页本身不带 Scaffold（真实 App 里挂在 AppShell 下），这里补上
+          home: const Scaffold(body: HomePage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    // 房子还在维权，不是「已经退租」；维权待办也得在首页上看得到
+    expect(find.text('现在的房子已经退租'), findsNothing);
+    expect(find.text('有 1 套房还在维权'), findsOneWidget);
+    expect(find.text('待办提醒'), findsOneWidget);
+    expect(find.text('押金纠纷维权中'), findsOneWidget);
+  });
+
+  testWidgets('退租：纠纷中的房子不给「待退还」这一选', (tester) async {
+    tester.view.physicalSize = const Size(390, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      final base = buildProperty();
+      await repository.addProperty(
+        base.copyWith(
+          status: PropertyStatus.dispute,
+          deposit: base.deposit.copyWith(
+            status: DepositStatus.inDispute,
+            deductedAmount: 2000,
+          ),
+        ),
+      );
+    });
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(
+          theme: ZTheme.light(),
+          home: const MoveOutPage(propertyId: 'p1'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    // 和押金追踪页同一套规则：纠纷中只能落到「部分扣除 / 已退还」
+    expect(find.text('待退还'), findsNothing, reason: '纠纷中回头选待退还没意义');
+    expect(find.text('部分扣除'), findsOneWidget);
+    expect(find.text('已退还'), findsOneWidget);
+  });
+
+  testWidgets('去纠纷：押金已退到手的房子不给标纠纷', (tester) async {
+    tester.view.physicalSize = const Size(390, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      final base = buildProperty();
+      await repository.addProperty(
+        base.copyWith(
+          deposit: base.deposit.copyWith(
+            status: DepositStatus.returned,
+            returnedAmount: 8000,
+            returnedDate: DateTime(2026, 10, 1),
+          ),
+        ),
+      );
+    });
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(
+          theme: ZTheme.light(),
+          home: const DisputePage(propertyId: 'p1'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    await tester.enterText(find.byType(TextField).first, '房东扣了 2000');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('确认标记纠纷'));
+    await tester.pumpAndSettle();
+
+    final saved = repository.propertyById('p1')!;
+    expect(
+      saved.status,
+      PropertyStatus.active,
+      reason: '押金已经退到手，押金流程走完了，不能再标纠纷',
+    );
+    expect(saved.deposit.status, DepositStatus.returned);
+  });
+
+  testWidgets('押金追踪：合同押金没填时不给做「部分扣除」', (tester) async {
+    tester.view.physicalSize = const Size(390, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      final base = buildProperty();
+      await repository.addProperty(
+        base.copyWith(contract: base.contract.copyWith(deposit: 0)),
+      );
+    });
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(
+          theme: ZTheme.light(),
+          home: const DepositPage(propertyId: 'p1'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    ChoiceChip chipOf(String label) =>
+        tester.widget<ChoiceChip>(find.widgetWithText(ChoiceChip, label));
+    expect(
+      chipOf('部分扣除').onSelected,
+      isNull,
+      reason: '合同里没填押金金额，谈不上扣了多少',
+    );
+    expect(chipOf('待退还').onSelected, isNotNull);
+  });
+
+  testWidgets('退租：确认框点「回去补」就不动房源', (tester) async {
+    tester.view.physicalSize = const Size(390, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      await repository.addProperty(buildProperty());
+    });
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(
+          theme: ZTheme.light(),
+          home: const MoveOutPage(propertyId: 'p1'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('完成退租'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('有 2 项还没做'), findsOneWidget);
+    expect(find.text('回去补'), findsOneWidget);
+    await tester.tap(find.text('回去补'));
+    await tester.pumpAndSettle();
+
+    expect(
+      repository.propertyById('p1')!.status,
+      PropertyStatus.active,
+      reason: '没确认就不该退租',
+    );
+    expect(find.text('仍要退租'), findsNothing);
+  });
+
+  testWidgets('退租：该做的都做了就是普通确认', (tester) async {
+    tester.view.physicalSize = const Size(390, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      await repository.addProperty(buildProperty());
+      // 退租照片 + 本月抄表都做过了
+      await repository.addPhoto(
+        EvidencePhoto(
+          id: 'ph1',
+          propertyId: 'p1',
+          room: '客厅',
+          phase: PhotoPhase.moveOut,
+          imageRef: 'media:p1/ph1.jpg',
+          thumbRef: 'media:p1/ph1.thumb.jpg',
+          timestamp: DateTime(2026, 10, 15),
+        ),
+      );
+      await repository.saveUtility(
+        UtilityRecord(
+          id: 'u1',
+          propertyId: 'p1',
+          month: monthKey(DateTime.now()),
+          electricity: const UtilityReading(
+            reading: 26000,
+            previousReading: 25814,
+            unitPrice: 0.55,
+            unit: 'kWh',
+          ),
+          recordedAt: DateTime.now(),
+        ),
+      );
+    });
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(
+          theme: ZTheme.light(),
+          home: const MoveOutPage(propertyId: 'p1'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('完成退租'));
+    await tester.pumpAndSettle();
+    expect(find.text('确认退租'), findsOneWidget);
+    expect(find.text('再看看'), findsOneWidget);
+    expect(find.textContaining('还没做'), findsNothing);
+    await tester.tap(find.text('再看看'));
+    await tester.pumpAndSettle();
+    expect(repository.propertyById('p1')!.status, PropertyStatus.active);
+  });
+
   testWidgets('押金追踪：已退租后不给「改回租住中」的回头路', (tester) async {
     tester.view.physicalSize = const Size(390, 1200);
     tester.view.devicePixelRatio = 1;
@@ -5874,10 +6296,23 @@ void groupWidgets() {
 
     ChoiceChip chipOf(String label) =>
         tester.widget<ChoiceChip>(find.widgetWithText(ChoiceChip, label));
-    expect(chipOf('已缴纳').onSelected, isNull, reason: '已退租后不能改回已缴纳，否则房源会被拽回租住中');
-    expect(chipOf('无押金').onSelected, isNull);
+    expect(
+      chipOf('已缴纳').onSelected,
+      isNull,
+      reason: '押金状态只许往前走：待退还之后不能再改回已缴纳',
+    );
+    expect(
+      find.widgetWithText(ChoiceChip, '无押金'),
+      findsNothing,
+      reason: '「要不要押金」不在状态选择里（那是页顶那一问的事）',
+    );
     expect(chipOf('已退还').onSelected, isNotNull, reason: '押金继续往后走（退到手）还是要能记账');
-    expect(find.textContaining('不能再改回「已缴纳 / 无押金」'), findsOneWidget);
+    expect(
+      chipOf('部分扣除').onSelected,
+      isNotNull,
+      reason: '待退还 → 部分扣除 是往前走，允许',
+    );
+    expect(find.textContaining('只能继续往后走'), findsOneWidget);
 
     // 真的点「已退还」也照常生效：押金能继续往前流转
     await tester.runAsync(() async {
@@ -5896,9 +6331,20 @@ void groupWidgets() {
       PropertyStatus.ended,
       reason: '押金继续流转，房源还是已退租',
     );
+    // 已退还 = 押金流程到头了：四个状态都不能再点
+    for (final label in ['已缴纳', '待退还', '部分扣除', '已退还']) {
+      expect(
+        chipOf(label).onSelected,
+        isNull,
+        reason: '押金已经退到手，「$label」不该还能点',
+      );
+    }
+    expect(find.textContaining('押金流程走完了'), findsOneWidget);
   });
 
-  testWidgets('押金追踪：纠纷中能改回「已缴纳」，但房源不恢复在租', (tester) async {
+  testWidgets('押金追踪：纠纷中不能改回「已缴纳」，只能往「部分扣除 / 已退还」走', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(390, 1200);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -5934,29 +6380,454 @@ void groupWidgets() {
         tester.widget<ChoiceChip>(find.widgetWithText(ChoiceChip, label));
     expect(
       chipOf('已缴纳').onSelected,
-      isNotNull,
-      reason: '纠纷中要把押金改回「已缴纳」（比如房东其实没收这笔钱）',
+      isNull,
+      reason: '押金状态只许往前走：纠纷中也不能改回「已缴纳」',
     );
-    expect(chipOf('无押金').onSelected, isNotNull);
     expect(
-      find.textContaining('押金可以改回「已缴纳 / 无押金」'),
+      find.widgetWithText(ChoiceChip, '无押金'),
+      findsNothing,
+      reason: '纠纷中的房子也不摆「无押金」——那是页顶那一问的事',
+    );
+    expect(
+      chipOf('待退还').onSelected,
+      isNull,
+      reason: '纠纷中回头选「待退还」没意义',
+    );
+    expect(
+      chipOf('部分扣除').onSelected,
+      isNotNull,
+      reason: '维权谈成的结果就是这两条：部分扣除 / 已退还',
+    );
+    expect(chipOf('已退还').onSelected, isNotNull);
+    expect(
+      find.textContaining('只能继续往后走'),
       findsOneWidget,
-      reason: '页面要写清：改押金不会让房源恢复「租住中」',
+      reason: '页面要写清为什么改不了',
     );
 
     await tester.runAsync(() async {
-      await tester.tap(find.widgetWithText(ChoiceChip, '已缴纳'));
+      await tester.tap(find.widgetWithText(ChoiceChip, '已退还'));
       await tester.pump();
       await Future<void>.delayed(const Duration(milliseconds: 50));
       await tester.pump();
     });
     await tester.pumpAndSettle();
     final saved = repository.propertyById('p1')!;
-    expect(saved.deposit.status, DepositStatus.paid);
+    expect(saved.deposit.status, DepositStatus.returned);
     expect(
       saved.status,
       PropertyStatus.dispute,
-      reason: '押金只是一笔钱的状态：改回已缴纳也不能把纠纷拽回租住中',
+      reason: '押金只是一笔钱的状态：押金退到手也不会把纠纷拽回租住中',
+    );
+  });
+
+  testWidgets('退租：押金已经在押金追踪里记过，就不再问一遍', (tester) async {
+    tester.view.physicalSize = const Size(390, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      final base = buildProperty();
+      await repository.addProperty(
+        base.copyWith(
+          deposit: base.deposit.copyWith(
+            status: DepositStatus.partiallyDeducted,
+            deductedAmount: 3000,
+            deductReason: '墙面有污渍',
+            returnedAmount: 5000,
+          ),
+        ),
+      );
+    });
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(
+          theme: ZTheme.light(),
+          home: const MoveOutPage(propertyId: 'p1'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    // 押金部分扣除已经记过了：这里只回显，不再摆「房东退了吗」和金额输入
+    expect(
+      find.text('房东退了吗'),
+      findsNothing,
+      reason: '两处都能改会互相覆盖，用户也得多填一次',
+    );
+    expect(find.text('押金退还 ¥5,000 · 扣除 ¥3,000'), findsOneWidget);
+    expect(find.text('扣除理由：墙面有污渍'), findsOneWidget);
+    expect(find.text('去押金追踪'), findsOneWidget);
+
+    // 还没记过的房子照旧在退租这一页结算押金
+    final other = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      await other.addProperty(buildProperty());
+    });
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: other,
+        child: MaterialApp(
+          theme: ZTheme.light(),
+          home: const MoveOutPage(propertyId: 'p1'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('房东退了吗'), findsOneWidget);
+  });
+
+  testWidgets('押金追踪：改押金状态不会把租住中的房子变成已退租', (tester) async {
+    tester.view.physicalSize = const Size(390, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      await repository.addProperty(buildProperty());
+    });
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(
+          theme: ZTheme.light(),
+          home: const DepositPage(propertyId: 'p1'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    // 只在押金页把状态改成「待退还」：没走退租流程，房源就不该变
+    await tester.runAsync(() async {
+      await tester.tap(find.widgetWithText(ChoiceChip, '待退还'));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await tester.pump();
+    });
+    await tester.pumpAndSettle();
+
+    final saved = repository.propertyById('p1')!;
+    expect(saved.deposit.status, DepositStatus.toBeReturned);
+    expect(
+      saved.status,
+      PropertyStatus.active,
+      reason: '押金只是一笔钱的状态：没走退租，房源就该还是「租住中」',
+    );
+  });
+
+  testWidgets('押金追踪：没填押金金额的提示不能贴在卡片上', (tester) async {
+    tester.view.physicalSize = const Size(390, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      // 合同里没填押金金额（= 0）：页面要额外给一条「去哪儿补」的提示
+      final base = buildProperty();
+      await repository.addProperty(
+        base.copyWith(contract: base.contract.copyWith(deposit: 0)),
+      );
+    });
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(
+          theme: ZTheme.light(),
+          home: const DepositPage(propertyId: 'p1'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    // 顶部卡片里的那行说明在这条提示的正上方，用它量出间距
+    final hint = tester.getRect(find.textContaining('还没填押金金额'));
+    final above = tester.getRect(find.text(DepositStatus.paid.hint));
+    expect(
+      hint.top - above.bottom,
+      greaterThanOrEqualTo(34),
+      reason: '提示条要和上面的押金卡片留出间距，不能顶在一起',
+    );
+  });
+
+  testWidgets('押金追踪：无押金的房源能在这儿改成需要押金', (tester) async {
+    tester.view.physicalSize = const Size(390, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      final base = buildProperty();
+      await repository.addProperty(
+        base.copyWith(
+          contract: base.contract.copyWith(deposit: 0),
+          deposit: base.deposit.copyWith(status: DepositStatus.none),
+        ),
+      );
+    });
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(
+          theme: ZTheme.light(),
+          home: const DepositPage(propertyId: 'p1'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    // 无押金：页面只留「要不要押金」这一问 + 金额输入
+    expect(
+      find.textContaining('还没填押金金额'),
+      findsNothing,
+      reason: '本来就不需要押金，别催人去补金额',
+    );
+    expect(find.text('当前房源暂不需要押金'), findsOneWidget);
+    expect(find.text('改成需要押金'), findsOneWidget);
+    expect(
+      find.text('更新押金状态'),
+      findsNothing,
+      reason: '还没有押金，别摆状态选择',
+    );
+    expect(find.text('金额明细'), findsNothing, reason: '还没有押金，没有明细可看');
+    expect(
+      find.text('编辑金额'),
+      findsNothing,
+      reason: '编辑金额按钮已经去掉了',
+    );
+
+    // 填金额 → 改成需要押金，那两段才出现
+    await tester.enterText(find.byType(TextField).first, '6000');
+    await tester.pumpAndSettle();
+    await tester.runAsync(() async {
+      await tester.tap(find.text('改成需要押金'));
+      // 保存要走一次真实的落盘，notifyListeners 在写完才触发 —— 给它足够时间
+      for (var i = 0; i < 10; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        await tester.pump();
+      }
+    });
+    await tester.pumpAndSettle();
+
+    final saved = repository.propertyById('p1')!;
+    expect(saved.contract.deposit, 6000, reason: '金额要写进合同');
+    expect(
+      saved.deposit.status,
+      DepositStatus.paid,
+      reason: '填了金额就说明这套房要押金，状态跟着记成「已缴纳」',
+    );
+    expect(saved.deposit.logs.last.note, contains('登记押金金额'));
+    expect(find.text('¥6,000'), findsWidgets, reason: '卡片与金额明细都要跟着更新');
+    expect(find.text('已缴纳'), findsWidgets);
+    expect(
+      find.text('更新押金状态'),
+      findsOneWidget,
+      reason: '改成需要押金之后，状态选择才出现',
+    );
+    expect(find.text('金额明细'), findsOneWidget);
+    expect(
+      find.text('生成对比报告'),
+      findsNothing,
+      reason: '这页不再摆生成对比报告，入口在房源详情的维权材料里',
+    );
+  });
+
+  testWidgets('押金追踪：选部分扣除要填扣款信息，保存后页面立刻更新', (tester) async {
+    tester.view.physicalSize = const Size(390, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      // 押金 8000、状态「已缴纳」：退租时房东扣了一部分
+      await repository.addProperty(buildProperty());
+    });
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(
+          theme: ZTheme.light(),
+          home: const DepositPage(propertyId: 'p1'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    // 点「部分扣除」→ 弹层只问三件事：扣了多少、为什么扣、维权备注
+    await tester.tap(find.widgetWithText(ChoiceChip, '部分扣除'));
+    await tester.pumpAndSettle();
+    expect(find.text('押金部分扣除'), findsOneWidget);
+    expect(find.text('扣除多少钱'), findsOneWidget);
+    expect(find.text('扣除理由'), findsOneWidget);
+    expect(
+      find.text('维权备注'),
+      findsWidgets,
+      reason: '弹层里有这个输入框（页面金额明细里也有同名行）',
+    );
+    expect(
+      find.byType(TextFormField),
+      findsNWidgets(3),
+      reason: '弹层里就这三个输入框',
+    );
+
+    await tester.enterText(find.byType(TextFormField).at(0), '2000');
+    await tester.enterText(find.byType(TextFormField).at(1), '墙面有污渍');
+    await tester.enterText(find.byType(TextFormField).at(2), '入住照片里墙面是干净的');
+    await tester.pumpAndSettle();
+    await tester.runAsync(() async {
+      await tester.tap(find.text('保存'));
+      for (var i = 0; i < 10; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        await tester.pump();
+      }
+    });
+    await tester.pumpAndSettle();
+
+    final saved = repository.propertyById('p1')!;
+    expect(saved.deposit.status, DepositStatus.partiallyDeducted);
+    expect(saved.deposit.deductedAmount, 2000);
+    expect(saved.deposit.deductReason, '墙面有污渍');
+    expect(saved.deposit.disputeNote, '入住照片里墙面是干净的');
+    expect(
+      saved.deposit.returnedAmount,
+      6000,
+      reason: '剩下的 8000 - 2000 算「已退还」，金额明细才对得上',
+    );
+
+    // 保存后页面立刻更新（以前会停在旧数据上）
+    expect(find.text('部分扣除'), findsWidgets, reason: '状态 pill 跟着变');
+    expect(find.text('¥2,000'), findsWidgets, reason: '被扣除');
+    expect(find.text('墙面有污渍'), findsWidgets);
+    expect(find.text('入住照片里墙面是干净的'), findsWidgets);
+
+    // 部分扣除之后：只能往「已退还」走，待退还 / 已缴纳都不能点
+    ChoiceChip chipOf(String label) =>
+        tester.widget<ChoiceChip>(find.widgetWithText(ChoiceChip, label));
+    expect(chipOf('已缴纳').onSelected, isNull);
+    expect(chipOf('待退还').onSelected, isNull);
+    expect(chipOf('已退还').onSelected, isNotNull);
+  });
+
+  testWidgets('首页与租住：房子都退租时摆押金摘要，点一下切到费用页', (tester) async {
+    tester.view.physicalSize = const Size(390, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      // 唯一一套房已经退租，押金还在房东手里
+      final base = buildProperty();
+      await repository.addProperty(
+        base.copyWith(
+          status: PropertyStatus.ended,
+          deposit: base.deposit.copyWith(
+            status: DepositStatus.toBeReturned,
+            returnedAmount: 0,
+            returnedDate: null,
+          ),
+        ),
+      );
+    });
+    final session = Session(repository.store);
+    await tester.runAsync(() => session.enterGuestMode());
+    final settings = ApiSettings(repository.store);
+    final cloud = CloudService(
+      repository: repository,
+      session: session,
+      settings: settings,
+      httpClient: MockClient(
+        (request) async => _jsonResponse({'code': '00000', 'data': {}}),
+      ),
+    );
+    addTearDown(cloud.dispose);
+    final notifications = NotificationService();
+    addTearDown(notifications.dispose);
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<Repository>.value(value: repository),
+          ChangeNotifierProvider<Session>.value(value: session),
+          ChangeNotifierProvider<CloudService>.value(value: cloud),
+          Provider<ApiSettings>.value(value: settings),
+          ChangeNotifierProvider<NotificationService>.value(
+            value: notifications,
+          ),
+        ],
+        child: MaterialApp(theme: ZTheme.light(), home: const AppShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    // 首页：不再是干巴巴的空状态，押金摘要排在最上面
+    expect(find.text('现在的房子已经退租'), findsOneWidget);
+    expect(find.text('还没退到手的押金'), findsOneWidget);
+    expect(find.text('¥8,000'), findsWidgets, reason: '唯一一套没退的押金');
+    expect(find.text('新增一套租住'), findsOneWidget);
+
+    // 点押金摘要 → 切到费用页（那里按套列着押金情况）
+    await tester.tap(find.text('还没退到手的押金'));
+    await tester.pumpAndSettle();
+    expect(find.text('押金情况'), findsOneWidget);
+    expect(find.text('翠屏里 3 栋 502'), findsOneWidget, reason: '费用页按套列');
+
+    // 租住页：同一张摘要卡；页面里不再重复两个「新增」按钮
+    await tester.tap(find.byIcon(Icons.home_work_outlined));
+    await tester.pumpAndSettle();
+    expect(find.text('没有在租的房子'), findsOneWidget, reason: '切换器的标题');
+    expect(find.text('还没退到手的押金'), findsOneWidget);
+    expect(find.text('添加新的租住'), findsNothing, reason: '别重复摆两个新增入口');
+    expect(find.text('新增一套租住'), findsOneWidget);
+  });
+
+  testWidgets('费用：不需要押金的房源不催着补金额', (tester) async {
+    tester.view.physicalSize = const Size(390, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      final base = buildProperty();
+      await repository.addProperty(
+        base.copyWith(
+          contract: base.contract.copyWith(deposit: 0),
+          deposit: base.deposit.copyWith(status: DepositStatus.none),
+        ),
+      );
+      await repository.setActive('p1');
+    });
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(theme: ZTheme.light(), home: const ExpensePage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    // 押金那块照实写「不需要押金」，而且没有那句催他补金额的副标题
+    expect(find.text('不需要押金'), findsWidgets);
+    expect(
+      find.textContaining('还没填押金金额'),
+      findsNothing,
+      reason: '本来就不需要押金，别催他补一个不该有的数',
+    );
+    expect(
+      find.text(DepositStatus.none.hint),
+      findsNothing,
+      reason: '副标题整句都不摆',
     );
   });
 
@@ -6010,6 +6881,88 @@ void groupWidgets() {
     await tester.tap(find.text('翠屏里 3 栋 502'));
     await tester.pumpAndSettle();
     expect(find.text('押金追踪'), findsOneWidget);
+  });
+
+  testWidgets('费用 / 首页：部分扣除的房子不能算「押金都结清了」', (tester) async {
+    tester.view.physicalSize = const Size(390, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      // 唯一一套房已经退租，押金 8000 里被扣走 3000（只拿回 5000）
+      final base = buildProperty();
+      await repository.addProperty(
+        base.copyWith(
+          status: PropertyStatus.ended,
+          deposit: base.deposit.copyWith(
+            status: DepositStatus.partiallyDeducted,
+            deductedAmount: 3000,
+            deductReason: '墙面有污渍',
+            returnedAmount: 5000,
+          ),
+        ),
+      );
+    });
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(theme: ZTheme.light(), home: const ExpensePage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    // 被扣的那部分没回到手上，摘要得照实写；不能念「都结清了」
+    expect(find.text('还没退到手的押金'), findsOneWidget);
+    expect(find.textContaining('被扣 ¥3,000'), findsWidgets);
+    expect(find.text('押金都结清了'), findsNothing);
+    expect(find.text('押金退还 ¥5,000 · 扣除 ¥3,000'), findsOneWidget);
+
+    // 押金真的都退到手时才是「都结清了」
+    final settled = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      await settled.addProperty(buildHistoryProperty());
+    });
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: settled,
+        child: MaterialApp(theme: ZTheme.light(), home: const ExpensePage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('押金都结清了'), findsOneWidget);
+    expect(find.text('还没退到手的押金'), findsNothing);
+  });
+
+  testWidgets('费用：一直显示当前是哪套房', (tester) async {
+    tester.view.physicalSize = const Size(390, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      await repository.addProperty(buildProperty());
+      await repository.setActive('p1');
+    });
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(theme: ZTheme.light(), home: const ExpensePage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    // 只有一套在租：也得看得出这一页的账是哪套房的
+    expect(find.text('翠屏里 3 栋 502'), findsWidgets);
+    expect(
+      find.text('切换房源'),
+      findsNothing,
+      reason: '只有一套在租，没什么可切的',
+    );
   });
 
   testWidgets('费用：切换房源只列租住中的', (tester) async {

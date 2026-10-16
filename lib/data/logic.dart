@@ -104,28 +104,13 @@ int countPaidMonths(List<RentRecord> rents, String propertyId) => rents
     .where((r) => r.propertyId == propertyId && r.status == RentStatus.paid)
     .length;
 
-/// 押金状态 → 房源状态的联动规则（双向可改，不会把房源状态锁死）。
-PropertyStatus statusForDeposit(DepositStatus deposit) => switch (deposit) {
-  DepositStatus.none => PropertyStatus.active,
-  DepositStatus.paid => PropertyStatus.active,
-  DepositStatus.toBeReturned => PropertyStatus.ended,
-  DepositStatus.partiallyDeducted => PropertyStatus.ended,
-  DepositStatus.returned => PropertyStatus.ended,
-  DepositStatus.inDispute => PropertyStatus.dispute,
-};
-
-/// 改完押金之后房源状态落在哪：**只有还在租住中的房子跟着押金联动**。
+/// 房源状态**不跟着押金走**（口径）：押金只是一笔钱的状态，把它改成
+/// 「待退还 / 已退还 / 部分扣除 / 纠纷中」都不该顺手把房子标成「已退租」——
+/// 人还住着呢，只是钱的事记了一笔（以前租住中的房子改押金会被映射成已退租，
+/// 出现「没退租却变已退租」的怪事）。
 ///
-/// 已退租 / 纠纷中的房子，押金只是一笔钱的状态：改押金（包括改回
-/// 「已缴纳 / 无押金」）都不动房源状态 —— 不会把房子拽回「租住中」，
-/// 也不会把纠纷顺手改成已退租。
-/// 房源状态的出口只有两个：退租页的「完成退租」和详情页的「去纠纷」。
-PropertyStatus propertyStatusAfterDeposit(
-  PropertyStatus current,
-  DepositStatus deposit,
-) => current == PropertyStatus.active
-    ? statusForDeposit(deposit)
-    : current;
+/// 房源状态只有两个出口：退租页的「完成退租」和详情页的「去纠纷」。
+/// 反过来也一样：已退租 / 纠纷中的房子改押金，房源状态一动不动。
 
 /// 还能不能给这套房子新增抄表记录：**已退租（含维权中）之后只读归档**，
 /// 只能翻记录、导出，不再允许新增或修改。
@@ -165,12 +150,16 @@ String depositLine(Property property) {
     DepositStatus.toBeReturned => '押金 ${fmtMoney(total)} 未退还',
     DepositStatus.inDispute =>
       '押金${deposit.status.label}（${fmtMoney(total)}）',
+    // 「押金无押金」不成话：没押金的房子直接说清楚
+    DepositStatus.none => '本房源无需押金',
     _ => '押金${deposit.status.label}',
   };
 }
 
 /// 还没退到手的押金：待退还算全部；纠纷中算争议的那部分（没填金额就算全部）；
-/// 已退还 / 部分扣除（钱已经到手或已谈妥）不算。
+/// 已退还不算。**部分扣除也不算在这条口径里** —— 那笔钱是被房东扣走的，
+/// 但也确实没回到手上，所以另有 [deductedDeposit] 单独数它，
+/// 摘要卡会把两者都摆出来（不然会出现「费用页说押金没退、摘要说已结清」的矛盾）。
 double outstandingDeposit(Property property) {
   final deposit = property.deposit;
   return switch (deposit.status) {
@@ -179,6 +168,64 @@ double outstandingDeposit(Property property) {
     DepositStatus.inDispute =>
       deposit.deductedAmount > 0 ? deposit.deductedAmount : property.contract.deposit,
     _ => 0,
+  };
+}
+
+/// 「部分扣除」里被房东扣走、没回到手上的那部分。
+///
+/// 和 [outstandingDeposit] 分开：前者是「还在等退还」，这是「已经确定被扣」，
+/// 摘要里两者都算「没到手」，但说法不同。
+double deductedDeposit(Property property) =>
+    property.deposit.status == DepositStatus.partiallyDeducted
+    ? property.deposit.deductedAmount
+    : 0;
+
+/// 这套房的押金还「没回到手上」吗 —— **看状态，不看金额**。
+///
+/// 只有「已退还」和「无押金」算结清；已缴纳 / 待退还 / 部分扣除 / 纠纷中都算没到手。
+/// 金额可以没填（0），但状态说了算 —— 按金额判断的话，没填金额的房子
+/// 会被摘要卡算成「押金都结清了」，而用户明明还等着房东退钱。
+bool depositNotBack(Property property) => switch (property.deposit.status) {
+  DepositStatus.returned || DepositStatus.none => false,
+  _ => true,
+};
+
+/// 押金状态能不能从 [from] 改成 [to]（口径：**只能往前走，不能回头**）。
+///
+///   已缴纳 → 待退还 / 部分扣除 / 已退还 / 纠纷中
+///   待退还 → 部分扣除 / 已退还 / 纠纷中
+///   部分扣除 → 已退还 / 纠纷中
+///   已退还 → 到头了，什么都不能改
+///   无押金 → 先走「要不要押金」那一问（见押金追踪页的提问卡）
+///   纠纷中 → 部分扣除 / 已退还（维权谈成的两个结果）
+///
+/// 「已缴纳」只有本来就停在它上面时才可选 —— 别处状态不能改回已缴纳。
+/// 三个入口（押金追踪页的状态选择、「退租」页的押金结算、详情页的「去纠纷」）
+/// 都走这一条判断，别各写一套。
+bool canSwitchDeposit(DepositStatus from, DepositStatus to) {
+  if (from == to) return false;
+  return switch (from) {
+    // 刚交完押金：往后随便走（退租结算 / 被扣 / 退到手 / 维权都行）
+    DepositStatus.paid => const {
+      DepositStatus.toBeReturned,
+      DepositStatus.partiallyDeducted,
+      DepositStatus.returned,
+      DepositStatus.inDispute,
+    }.contains(to),
+    // 等着退还：可以变成被扣 / 退到手，或者去维权
+    DepositStatus.toBeReturned => const {
+      DepositStatus.partiallyDeducted,
+      DepositStatus.returned,
+      DepositStatus.inDispute,
+    }.contains(to),
+    // 已经谈成扣款：只剩「都退回来（走维权）」两条路
+    DepositStatus.partiallyDeducted =>
+      to == DepositStatus.returned || to == DepositStatus.inDispute,
+    // 维权中：落到谈成的两个结果上
+    DepositStatus.inDispute =>
+      to == DepositStatus.partiallyDeducted || to == DepositStatus.returned,
+    // 已退还（流程走完）、无押金（先走「要不要押金」那一问）都不在这里改
+    _ => false,
   };
 }
 

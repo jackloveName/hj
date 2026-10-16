@@ -214,10 +214,12 @@ class PhotoDetailPage extends StatelessWidget {
           final bottom = MediaQuery.viewInsetsOf(ctx).bottom;
           return Padding(
             padding: EdgeInsets.fromLTRB(18, 0, 18, 20 + bottom),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+            // 键盘顶起来时内容要能滚（不然小屏上会 RenderFlex overflowed）
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                 Text('修改问题说明', style: ZText.title3.copyWith(fontSize: 17)),
                 const SizedBox(height: 14),
                 Wrap(
@@ -242,6 +244,7 @@ class PhotoDetailPage extends StatelessWidget {
                 const SizedBox(height: 16),
                 ZButton(label: '保存', onTap: () => Navigator.of(ctx).pop(true)),
               ],
+              ),
             ),
           );
         },

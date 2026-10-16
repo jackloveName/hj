@@ -54,11 +54,6 @@ class ExportService {
     );
   }
 
-  ExportBundle buildBackup() => ExportBundle(
-    bytes: Uint8List.fromList(utf8.encode(repository.backupJson())),
-    fileName: 'zudun_backup_${fmtDate(DateTime.now())}.json',
-  );
-
   String _safe(String input) =>
       input.replaceAll(RegExp(r'[\\/:*?"<>|\s]+'), '_');
 }

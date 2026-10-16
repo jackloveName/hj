@@ -152,7 +152,8 @@ class _DisputePageState extends State<DisputePage> {
                 ),
                 const SizedBox(height: 14),
                 const ZHintBar(
-                  text: '标记之后：房源转入「纠纷中」，合同、照片、抄表都变成只读，'
+                  text: '标记之后：这套房按「已经搬走、进入维权」处理 —— '
+                      '合同、照片、抄表都变成只读，不再记租金与抄表；'
                       '沟通记录还能继续补（那是维权留证）。',
                   icon: Icons.lock_outline_rounded,
                 ),
@@ -176,8 +177,14 @@ class _DisputePageState extends State<DisputePage> {
     }
     final deducted = double.tryParse(_deducted.text.trim()) ?? 0;
 
-    setState(() => _busy = true);
     final deposit = property.deposit;
+    // 押金状态只能往前走：已经「已退还」的房子押金流程走完了，
+    // 不能再被标成纠纷（部分扣除 → 纠纷中 是允许的：不服这笔扣款就继续维权）
+    if (!canSwitchDeposit(deposit.status, DepositStatus.inDispute)) {
+      zToast(context, '押金已经退到手了：这套房的押金流程走完了，不能再标押金纠纷');
+      return;
+    }
+    setState(() => _busy = true);
     try {
       await repository.updateProperty(
         property.copyWith(

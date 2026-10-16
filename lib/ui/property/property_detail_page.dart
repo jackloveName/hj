@@ -139,9 +139,9 @@ class PropertyDetailPage extends StatelessWidget {
                     ),
                     child: Column(
                       children: [
-                        // 房源状态是跟着押金状态走的（见 statusForDeposit）：
-                        // 退租走一整页的结算（押金 + 与房东对接），
-                        // 纠纷就是把状态标上并写清原因
+                        // 房源状态只在这两条路上变：退租走一整页的结算
+                        // （押金 + 与房东对接），纠纷就是把状态标上并写清原因
+                        // （在押金页改押金状态不会动房源状态）
                         ZListRow(
                           icon: Icons.key_outlined,
                           title: '去退租',
@@ -170,12 +170,58 @@ class PropertyDetailPage extends StatelessWidget {
                     ),
                   ),
                 ],
+                const SizedBox(height: 26),
+                // 加错了的房子（或者只是想清掉）总得能删：入口放最后，
+                // 二次确认里写清会连照片和记录一起删
+                Center(
+                  child: TextButton.icon(
+                    onPressed: () =>
+                        _confirmDelete(context, repository, property),
+                    icon: const Icon(
+                      Icons.delete_outline_rounded,
+                      size: 16,
+                      color: Z.dangerDeep,
+                    ),
+                    label: Text(
+                      '删除这套房源',
+                      style: ZText.label.copyWith(color: Z.dangerDeep),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
         ],
       ),
     );
+  }
+
+  /// 删除整套房子（含照片与全部记录）。
+  ///
+  /// 这是不可恢复的操作，二次确认里要把「会删掉什么」和「更好的做法」都写清楚：
+  /// 想结束租约走「退租」，要留证据就先导出报告或照片包。
+  Future<void> _confirmDelete(
+    BuildContext context,
+    Repository repository,
+    Property property,
+  ) async {
+    final photos = repository.photosOf(property.id).length;
+    final ok = await zConfirm(
+      context,
+      title: '删除「${property.name}」？',
+      message:
+          '会连同这套房的 $photos 张照片、合同与全部记录一起删掉，删了拿不回来。\n\n'
+          '只是想结束租约的话，用「退租」；要拿去维权的话，先导出对比报告或照片包。',
+      confirmText: '删除',
+      cancelText: '再想想',
+      danger: true,
+    );
+    if (!ok || !context.mounted) return;
+    await repository.deleteProperty(property.id);
+    if (!context.mounted) return;
+    // 房子没了，这一页也就没有内容可看了，退回上一页
+    Navigator.of(context).maybePop();
+    zToast(context, '已删除「${property.name}」');
   }
 }
 
@@ -347,7 +393,8 @@ class _TenancyRecapCard extends StatelessWidget {
               Text('租住回顾', style: _labelStyle),
               const Spacer(),
               // 押金没退到手就在这儿挂一颗，退出再进来也一眼看得到
-              if (outstandingDeposit(property) > 0) ...[
+              // （按状态判断：金额没填也算没退到手）
+              if (depositNotBack(property)) ...[
                 ZPill(
                   label: '押金未退',
                   background: Z.warn.withValues(alpha: 0.22),

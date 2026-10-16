@@ -1343,3 +1343,20 @@ Future<bool> zConfirm(
 
 Future<T?> zPush<T>(BuildContext context, Widget page) =>
     Navigator.of(context).push<T>(MaterialPageRoute<T>(builder: (_) => page));
+
+/// 让子页面能切底部标签页（首页 / 租住页的押金摘要点一下跳到费用页）。
+///
+/// 由 [AppShell] 提供；直接 pump 单个页面（测试、预览脚本）时这层不存在，
+/// `of` 返回 null，调用方按「没有跳转入口」处理即可。
+class ZTabSwitch extends InheritedWidget {
+  const ZTabSwitch({super.key, required this.goTo, required super.child});
+
+  /// 参数是底部标签的下标：0 首页 / 1 租住 / 2 费用 / 3 我的
+  final void Function(int index) goTo;
+
+  static void Function(int index)? of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<ZTabSwitch>()?.goTo;
+
+  @override
+  bool updateShouldNotify(ZTabSwitch oldWidget) => false;
+}

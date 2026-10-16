@@ -1085,25 +1085,6 @@ class Repository extends ChangeNotifier {
     }
   }
 
-  String backupJson() =>
-      const JsonEncoder.withIndent('  ').convert(_snapshot());
-
-  Future<void> restoreFromJson(String raw) async {
-    final decoded = jsonDecode(raw);
-    if (decoded is! Map) throw const FormatException('数据格式不正确');
-    // 覆盖前先清理旧媒体文件，避免留下永远不会再被引用的孤儿照片
-    for (final photo in _photos) {
-      await _deletePhotoFiles(photo);
-    }
-    _apply(decoded.map((k, v) => MapEntry(k.toString(), v)));
-    _normalize();
-    for (final property in _properties) {
-      _ensureRentSchedule(property);
-    }
-    _mediaBytes = await _media.usedBytes();
-    await _persist();
-  }
-
   Future<void> clearAll() async {
     for (final photo in _photos) {
       await _deletePhotoFiles(photo);

@@ -742,7 +742,8 @@ class _PropertyEditPageState extends State<PropertyEditPage> {
             landlord: landlord,
             contract: contract,
             // 状态不在这里手选：新建就是「租住中」，
-            // 之后由「押金追踪」的押金状态驱动（见 statusForDeposit）
+            // 之后也只有「完成退租」和「去纠纷」这两条路会改它
+            // （押金状态不联动房源状态，见 logic.dart 的口径）
             status: PropertyStatus.active,
             deposit: DepositInfo(
               status: _hasDeposit ? DepositStatus.paid : DepositStatus.none,

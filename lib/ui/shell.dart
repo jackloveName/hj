@@ -186,7 +186,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       ],
     );
 
-    if (!isWide) return Scaffold(body: body);
+    final shell = ZTabSwitch(goTo: _selectTab, child: body);
+
+    if (!isWide) return Scaffold(body: shell);
 
     return Scaffold(
       backgroundColor: Z.shell,
@@ -200,7 +202,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             boxShadow: Z.e3,
           ),
           clipBehavior: Clip.antiAlias,
-          child: body,
+          child: shell,
         ),
       ),
     );

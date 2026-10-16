@@ -8,6 +8,7 @@ import '../../utils/format.dart';
 import '../kit.dart';
 import '../property/property_edit_page.dart';
 import 'deposit_page.dart';
+import 'deposit_summary_card.dart';
 import 'utility_page.dart';
 
 /// SCREEN 06 · 费用 · 租金日历
@@ -43,6 +44,8 @@ class _ExpensePageState extends State<ExpensePage> {
     final rentRecord = repository.rentOfMonth(property.id, key);
     final paidMonths = repository.paidMonthsOf(property.id);
     final hasDepositAmount = property.contract.deposit > 0;
+    /// 不需要押金：既不摆「未填写」，也不写那句催他去补金额的副标题
+    final noDeposit = property.deposit.status == DepositStatus.none;
 
     return ZScreen(
       child: Column(
@@ -54,30 +57,48 @@ class _ExpensePageState extends State<ExpensePage> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
               children: [
-                // 多套**在租**房子时才需要切换：放在最上面，点一下换一套。
-                // 已退租 / 纠纷中的房子不进这个切换 —— 费用只跟还在租的有关
-                if (repository.properties
-                        .where((item) => item.status == PropertyStatus.active)
-                        .length >
-                    1)
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton.icon(
-                      onPressed: () => _switch(context, repository),
-                      style: TextButton.styleFrom(
-                        minimumSize: const Size(0, 32),
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      icon: const Icon(Icons.swap_horiz_rounded, size: 16),
-                      label: Text(
-                        '切换房源 · ${property.name}',
-                        style: ZText.caption.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
+                // 先说清「这些账是哪套房的」：房源名一直是这页的标题，
+                // 多套在租时才多一个「切换房源」按钮
+                // （已退租 / 纠纷中的房子不进切换 —— 费用只跟还在租的有关）
+                Row(
+                  children: [
+                    Icon(
+                      Icons.home_outlined,
+                      size: ZIcon.s,
+                      color: Z.ink3,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        property.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: ZText.title4,
                       ),
                     ),
-                  ),
+                    if (repository.properties
+                            .where(
+                              (item) => item.status == PropertyStatus.active,
+                            )
+                            .length >
+                        1)
+                      TextButton.icon(
+                        onPressed: () => _switch(context, repository),
+                        style: TextButton.styleFrom(
+                          minimumSize: const Size(0, 32),
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        icon: const Icon(Icons.swap_horiz_rounded, size: 16),
+                        label: Text(
+                          '切换房源',
+                          style: ZText.caption.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
                 _SummaryCard(
                   property: property,
                   paidMonths: paidMonths,
@@ -166,22 +187,28 @@ class _ExpensePageState extends State<ExpensePage> {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              hasDepositAmount
+                              noDeposit
+                                  ? '不需要押金'
+                                  : hasDepositAmount
                                   ? fmtMoney(property.contract.deposit)
                                   : '未填写',
                               style: ZText.title2.copyWith(fontSize: 20),
                             ),
-                            const SizedBox(height: 3),
-                            Text(
-                              hasDepositAmount
-                                  ? property.deposit.status.hint
-                                  : '还没填押金金额：去「编辑房源 → 押金金额」补上，'
-                                        '退租时才有据可查',
-                              style: ZText.small.copyWith(
-                                fontSize: 11,
-                                height: 1.5,
+                            // 本来就不需要押金的房子：没有「金额没填」这回事，
+                            // 副标题整句去掉（别催他补一个根本不该有的数）
+                            if (!noDeposit) ...[
+                              const SizedBox(height: 3),
+                              Text(
+                                hasDepositAmount
+                                    ? property.deposit.status.hint
+                                    : '还没填押金金额：去「编辑房源 → 押金金额」补上，'
+                                          '退租时才有据可查',
+                                style: ZText.small.copyWith(
+                                  fontSize: 11,
+                                  height: 1.5,
+                                ),
                               ),
-                            ),
+                            ],
                           ],
                         ),
                       ),
@@ -320,10 +347,6 @@ class _DepositOverview extends StatelessWidget {
     // 最近退租的排在上面
     final properties = [...repository.properties]
       ..sort((a, b) => moveOutDate(b).compareTo(moveOutDate(a)));
-    final outstanding = properties.fold<double>(
-      0,
-      (sum, property) => sum + outstandingDeposit(property),
-    );
 
     return Column(
       children: [
@@ -342,34 +365,11 @@ class _DepositOverview extends StatelessWidget {
                 icon: Icons.savings_outlined,
                 moreLabel: '${properties.length} 套',
               ),
-              if (outstanding > 0) ...[
-                ZCard(
-                  // 令牌里没有 warnTint：用告警色兑一点浅底，和 ZHintBar 一个做法
-                  color: Z.warn.withValues(alpha: 0.10),
-                  border: Border.all(color: Z.warnDeep.withValues(alpha: 0.25)),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.hourglass_bottom_rounded,
-                        size: 18,
-                        color: Z.warnDeep,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text('还没退到手的押金', style: ZText.label),
-                      ),
-                      Text(
-                        fmtMoney(outstanding),
-                        style: ZText.title3.copyWith(
-                          fontSize: 18,
-                          color: Z.warnDeep,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 10),
-              ],
+              // 和首页 / 租住页同一张摘要卡，三处口径与长相都一致
+              // （「部分扣除」被扣走的那部分也算没到手，所以一律摆出来，
+              //  都由卡片自己决定是告警还是「都结清了」）
+              DepositSummaryCard(properties: properties),
+              const SizedBox(height: 10),
               ZCard(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 15,
@@ -910,7 +910,11 @@ class _SummaryCard extends StatelessWidget {
               ),
               const SizedBox(width: 5),
               Text(
-                '押金 ${fmtMoney(property.contract.deposit)} · ${property.deposit.status.label}',
+                // 不需要押金的房子别念「押金 ¥0 · 无押金」，一句话说清
+                property.deposit.status == DepositStatus.none
+                    ? '这套房不需要押金'
+                    : '押金 ${fmtMoney(property.contract.deposit)}'
+                          ' · ${property.deposit.status.label}',
                 style: const TextStyle(
                   fontFamily: Z.font,
                   fontFamilyFallback: Z.fallback,

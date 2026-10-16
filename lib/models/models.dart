@@ -82,11 +82,12 @@ enum PropertyStatus {
   final ZTone tone;
 }
 
-/// 押金五态
+/// 押金状态：六种，其中「无押金」由「要不要押金」那一问决定、
+/// 「纠纷中」跟着房源状态走，界面上可选的是中间四种（且只能往前走）
 enum DepositStatus {
   none('无押金', ZTone.ok, '本房源无需押金。'),
   paid('已缴纳', ZTone.brand, '入住时已支付押金，退租时记得要回。'),
-  toBeReturned('待退还', ZTone.warn, '已退租，等待房东退还押金。'),
+  toBeReturned('待退还', ZTone.warn, '押金等着房东退还，退到手再更新。'),
   partiallyDeducted('部分扣除', ZTone.warn, '房东扣除了部分押金，请核对扣款理由。'),
   returned('已退还', ZTone.ok, '押金已全额退还。'),
   inDispute('纠纷中', ZTone.danger, '押金被无理扣除，正在维权。');

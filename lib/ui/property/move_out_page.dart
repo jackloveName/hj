@@ -6,6 +6,7 @@ import '../../models/models.dart';
 import '../../theme/tokens.dart';
 import '../../utils/format.dart';
 import '../compare/compare_page.dart';
+import '../expense/deposit_page.dart';
 import '../expense/utility_page.dart';
 import '../kit.dart';
 
@@ -33,16 +34,22 @@ class _MoveOutPageState extends State<MoveOutPage> {
   final TextEditingController _deductReason = TextEditingController();
   final TextEditingController _handoverNote = TextEditingController();
 
-  /// 押金怎么处理：只给真的会出现在退租这一步的三个状态
+  /// 押金怎么处理。可选范围见 [_choices]（按当前状态过滤，和押金追踪页同一套规则）
   DepositStatus _deposit = DepositStatus.toBeReturned;
   bool _handoverDone = false;
   bool _busy = false;
 
-  static const List<DepositStatus> _choices = [
-    DepositStatus.returned,
-    DepositStatus.partiallyDeducted,
+  /// 退租这一步可能出现的押金结果（三个里再按当前状态筛）
+  /// 顺序按押金的流转走：待退还 → 部分扣除 → 已退还
+  static const List<DepositStatus> _allChoices = [
     DepositStatus.toBeReturned,
+    DepositStatus.partiallyDeducted,
+    DepositStatus.returned,
   ];
+
+  /// 这一页实际能选的结果：只留「从这个押金状态往前走」走得通的
+  /// （口径见 canSwitchDeposit，和押金追踪页共用一套判断）
+  List<DepositStatus> _choices = const [];
 
   @override
   void initState() {
@@ -50,7 +57,14 @@ class _MoveOutPageState extends State<MoveOutPage> {
     final property = context.read<Repository>().propertyById(widget.propertyId);
     if (property == null) return;
     final deposit = property.deposit;
-    if (_choices.contains(deposit.status)) _deposit = deposit.status;
+    _choices = _allChoices
+        .where((status) => canSwitchDeposit(deposit.status, status))
+        .toList();
+    if (_choices.contains(deposit.status)) {
+      _deposit = deposit.status;
+    } else if (_choices.isNotEmpty) {
+      _deposit = _choices.first;
+    }
     _returned.text = deposit.returnedAmount > 0
         ? fmtAmount(deposit.returnedAmount)
         : (deposit.status == DepositStatus.returned && property.contract.deposit > 0
@@ -83,6 +97,11 @@ class _MoveOutPageState extends State<MoveOutPage> {
     final property = repository.propertyById(widget.propertyId);
     if (property == null) return const ZScreen(child: SizedBox.shrink());
     final hasDeposit = property.contract.deposit > 0;
+    /// 押金已经在「押金追踪」里记过结果（待退还 / 部分扣除 / 已退还）：
+    /// 这一页只把它带过去收尾，不再问一遍「房东退了吗」
+    /// （这页没什么可选的，比如无押金的房子，也按「不用问」处理）
+    final depositSettled =
+        _choices.isEmpty || _allChoices.contains(property.deposit.status);
     final moveOutPhotos = repository.photoCountOf(
       property.id,
       phase: PhotoPhase.moveOut,
@@ -170,9 +189,50 @@ class _MoveOutPageState extends State<MoveOutPage> {
                           divider: false,
                         ),
                         const SizedBox(height: 10),
-                        Text('房东退了吗', style: ZText.label.copyWith(fontSize: 13)),
-                        const SizedBox(height: 8),
-                        ZChips<DepositStatus>(
+                        // 押金已经在「押金追踪」里记过结果了：这一页只回显，
+                        // 不再问一遍「房东退了吗」—— 两处都能改只会互相覆盖，
+                        // 用户也得多填一次
+                        if (depositSettled) ...[
+                          Row(
+                            children: [
+                              ZTag(
+                                label: property.deposit.status.label,
+                                tone: property.deposit.status.tone,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  depositLine(property),
+                                  style: ZText.caption.copyWith(height: 1.5),
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (property.deposit.deductReason.isNotEmpty) ...[
+                            const SizedBox(height: 6),
+                            Text(
+                              '扣除理由：${property.deposit.deductReason}',
+                              style: ZText.caption.copyWith(height: 1.5),
+                            ),
+                          ],
+                          const SizedBox(height: 10),
+                          ZButton(
+                            label: '去押金追踪',
+                            style: ZButtonStyle.ghost,
+                            icon: Icons.savings_outlined,
+                            onTap: () => zPush(
+                              context,
+                              DepositPage(propertyId: property.id),
+                            ),
+                          ),
+                        ],
+                        if (!depositSettled)
+                          Text(
+                            '房东退了吗',
+                            style: ZText.label.copyWith(fontSize: 13),
+                          ),
+                        if (!depositSettled) const SizedBox(height: 8),
+                        if (!depositSettled) ZChips<DepositStatus>(
                           options: _choices,
                           value: _deposit,
                           emphasize: true,
@@ -181,8 +241,9 @@ class _MoveOutPageState extends State<MoveOutPage> {
                           onChanged: (status) =>
                               setState(() => _deposit = status),
                         ),
-                        const SizedBox(height: 14),
-                        if (_deposit == DepositStatus.returned)
+                        if (!depositSettled) const SizedBox(height: 14),
+                        if (!depositSettled &&
+                            _deposit == DepositStatus.returned)
                           TextField(
                             controller: _returned,
                             keyboardType: TextInputType.number,
@@ -192,8 +253,9 @@ class _MoveOutPageState extends State<MoveOutPage> {
                               helperText:
                                   '押金 ${fmtMoney(property.contract.deposit)} 全额退还就照着填',
                             ),
-                          )
-                        else if (_deposit == DepositStatus.partiallyDeducted) ...[
+                          ),
+                        if (!depositSettled &&
+                            _deposit == DepositStatus.partiallyDeducted) ...[
                           Row(
                             children: [
                               Expanded(
@@ -242,7 +304,9 @@ class _MoveOutPageState extends State<MoveOutPage> {
                               hintText: '房东怎么说就怎么写，维权时这就是证据',
                             ),
                           ),
-                        ] else
+                        ],
+                        if (!depositSettled &&
+                            _deposit == DepositStatus.toBeReturned)
                           Text(
                             '押金还没到手也能先完成退租：会照实记成「未退还」，'
                             '等房东退到手再回来补上金额。',
@@ -341,6 +405,32 @@ class _MoveOutPageState extends State<MoveOutPage> {
         zToast(context, '写一下房东给的扣除理由');
         return;
       }
+    }
+
+    // 退租不可逆（房源转「已退租」、资料进只读归档），点之前再确认一次
+    if (property.status == PropertyStatus.active) {
+      // 「退租前确认」里那两件没做的事，在确认框里点出来 ——
+      // 退完就进只读归档，这两项再也补不了
+      final missing = <String>[
+        if (repository.photoCountOf(property.id, phase: PhotoPhase.moveOut) == 0)
+          '退租取证',
+        if (repository.utilityOfMonth(property.id, monthKey(DateTime.now())) ==
+            null)
+          '最后一次抄表',
+      ];
+      final ok = await zConfirm(
+        context,
+        title: '完成退租？',
+        message: missing.isEmpty
+            ? '确认后房源转入「已退租」，照片和合同变成只读归档'
+                  '${contractDeposit > 0 ? '，押金按上面记的结果带过去' : ''}。'
+            : '有 ${missing.length} 项还没做：${missing.join('、')}。'
+                  '退租之后这套房就只读了，这两项再也补不了。',
+        confirmText: missing.isEmpty ? '确认退租' : '仍要退租',
+        cancelText: missing.isEmpty ? '再看看' : '回去补',
+        danger: missing.isNotEmpty,
+      );
+      if (!ok || !mounted) return;
     }
 
     setState(() => _busy = true);

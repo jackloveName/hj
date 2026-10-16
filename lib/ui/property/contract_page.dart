@@ -156,8 +156,19 @@ class ContractPage extends StatelessWidget {
                       ZKv(
                         label: '租住方式',
                         value: contract.rentScope,
-                        divider: false,
+                        divider: canEditProperty(property),
                       ),
+                      // 续租：只改到期日（要涨租一起改），起租日与押金不动。
+                      // 已退租 / 纠纷中是只读归档，不给这个入口
+                      if (canEditProperty(property))
+                        ZListRow(
+                          icon: Icons.event_repeat_outlined,
+                          title: '续租',
+                          subtitle: '延长合同到期日，顺便改月租（涨租）',
+                          onTap: () =>
+                              _renew(context, repository, property),
+                          divider: false,
+                        ),
                     ],
                   ),
                 ),
@@ -191,6 +202,112 @@ class ContractPage extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+
+  /// 续租：只动「合同到期日」和「月租」，起租日、押金、押金状态都不碰。
+  ///
+  /// 保存后由 repository 按新的到期日把租金计划往后补齐（多出来的月份
+  /// 会生成待付账单），不用再去「编辑房源」改一堆字段。
+  Future<void> _renew(
+    BuildContext context,
+    Repository repository,
+    Property property,
+  ) async {
+    final contract = property.contract;
+    var end = contract.contractEnd;
+    var rentText = fmtAmount(contract.monthlyRent);
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          final bottom = MediaQuery.viewInsetsOf(ctx).bottom;
+          return Padding(
+            padding: EdgeInsets.fromLTRB(18, 0, 18, 20 + bottom),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('续租', style: ZText.title3.copyWith(fontSize: 17)),
+                  const SizedBox(height: 6),
+                  Text(
+                    '现在到期日 ${fmtDate(contract.contractEnd)}：'
+                    '改成新的到期日就行，起租日与押金不动。',
+                    style: ZText.caption.copyWith(height: 1.5),
+                  ),
+                  const SizedBox(height: 14),
+                  InkWell(
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: () async {
+                      final picked = await pickDate(
+                        ctx,
+                        initial: end,
+                        helpText: '选择新的到期日',
+                      );
+                      if (picked != null) setSheetState(() => end = picked);
+                    },
+                    child: InputDecorator(
+                      decoration: const InputDecoration(
+                        labelText: '新的到期日',
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(child: Text(fmtDate(end))),
+                          Icon(
+                            Icons.calendar_today_outlined,
+                            size: 16,
+                            color: Z.ink3,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    initialValue: rentText,
+                    keyboardType: TextInputType.number,
+                    onChanged: (text) => rentText = text,
+                    decoration: const InputDecoration(
+                      labelText: '月租（涨租就改这里）',
+                      prefixText: '¥ ',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  ZButton(label: '保存续租', onTap: () => Navigator.of(ctx).pop(true)),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+    if (saved != true) return;
+
+    final rent = double.tryParse(rentText.trim()) ?? 0;
+    if (!end.isAfter(contract.contractEnd)) {
+      if (context.mounted) zToast(context, '新的到期日要晚于现在的到期日');
+      return;
+    }
+    if (rent <= 0) {
+      if (context.mounted) zToast(context, '月租要大于 0');
+      return;
+    }
+    // 用仓库里最新那份当底：这一页的表底数是另外写盘的
+    final latest = repository.propertyById(property.id) ?? property;
+    await repository.updateProperty(
+      latest.copyWith(
+        contract: latest.contract.copyWith(
+          contractEnd: end,
+          monthlyRent: rent,
+        ),
+      ),
+    );
+    if (!context.mounted) return;
+    zToast(
+      context,
+      '已续租到 ${fmtDate(end)}· 月租 ${fmtMoney(rent)}',
     );
   }
 

@@ -37,7 +37,10 @@ Widget _contractSection(Property property) {
     if (contract.hasGasMeter && contract.moveInGas != null)
       '燃气 ${fmtAmount(contract.moveInGas!)}',
   ];
+  // 这几段是嵌在详情页 ListView 里的 Column：不给 stretch 的话，
+  // 卡片宽度会被内容撑出来（内容短的那几段会缩成一小块，和别的段对不齐）
   return Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       const ZSectionTitle(
         title: '合同信息',
@@ -110,6 +113,7 @@ Widget _evidenceSection(
   final thumbs = [...moveIn, ...moveOut].take(6).toList();
 
   return Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       ZSectionTitle(
         title: '入住取证',
@@ -170,6 +174,7 @@ Widget _rulesSection(Repository repository, Property property) {
   // 合同里的特殊条款也算一条房东要求（和详情页那个格子同一个口径）
   final count = landlordRuleCount(property, rules);
   return Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       ZSectionTitle(
         title: '房东要求',
@@ -210,6 +215,7 @@ Widget _rulesSection(Repository repository, Property property) {
 Widget _repairsSection(Repository repository, Property property) {
   final repairs = repository.repairsOf(property.id);
   return Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       ZSectionTitle(
         title: '维修记录',
@@ -248,6 +254,7 @@ Widget _repairsSection(Repository repository, Property property) {
 Widget _commsSection(Repository repository, Property property) {
   final comms = repository.commsOf(property.id);
   return Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       ZSectionTitle(
         title: '沟通记录',
