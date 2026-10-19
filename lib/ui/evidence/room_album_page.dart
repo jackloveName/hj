@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 import '../../data/repository.dart';
 import '../../models/models.dart';
 import '../../theme/tokens.dart';
-import '../../utils/format.dart';
 import '../kit.dart';
 import '../media.dart';
 import '../pickers.dart';
@@ -117,23 +116,13 @@ class _RoomAlbumPageState extends State<RoomAlbumPage> {
                                     child: ZPhoto(
                                       ref: photo.imageRef,
                                       fit: BoxFit.contain,
-                                      watermark: [
-                                        '${photo.issueType.emoji} ${photo.issueType.label}',
-                                        fmtDateTime(photo.timestamp),
-                                      ],
                                     ),
                                   ),
                                 ),
                               ),
                             ),
-                            const SizedBox(height: 5),
-                            Text(
-                              fmtDateTime(photo.timestamp),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: ZText.mono.copyWith(fontSize: 11),
-                            ),
-                            const SizedBox(height: 4),
+                            const SizedBox(height: 8),
+                            // 时间已经在水印条里了，这里不再重复一遍
                             Text(
                               '${index + 1} / ${photos.length}',
                               style: ZText.caption.copyWith(fontSize: 11),
@@ -158,26 +147,8 @@ class _RoomAlbumPageState extends State<RoomAlbumPage> {
                       return GestureDetector(
                         onTap: () =>
                             zPush(context, PhotoDetailPage(photoId: photo.id)),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: ZPhoto(
-                                ref: photo.imageRef,
-                                watermark: [
-                                  '${photo.issueType.emoji} ${photo.issueType.label}',
-                                  fmtDateTime(photo.timestamp),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 5),
-                            Text(
-                              fmtDateTime(photo.timestamp),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: ZText.mono.copyWith(fontSize: 11),
-                            ),
-                          ],
+                        child: ZPhoto(
+                          ref: photo.imageRef,
                         ),
                       );
                     },

@@ -8049,7 +8049,6 @@ void groupWidgets() {
       BoxFit.contain,
       reason: '单图模式要完整显示照片，不能裁掉边缘',
     );
-
     await tester.drag(find.byType(PageView), const Offset(-400, 0));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 600));
