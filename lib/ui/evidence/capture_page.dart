@@ -65,8 +65,7 @@ class _CapturePageState extends State<CapturePage> {
 
   void _initDefaultLocation() {
     if (_defaultLocation != null) return;
-    final property =
-        context.read<Repository>().propertyById(widget.propertyId);
+    final property = context.read<Repository>().propertyById(widget.propertyId);
     final address = property?.address.trim() ?? '';
     if (address.isNotEmpty) {
       _defaultLocation = address;
@@ -190,79 +189,86 @@ class _CapturePageState extends State<CapturePage> {
   }
 
   Widget _photoArea() {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 10),
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(borderRadius: BorderRadius.circular(12)),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final imageSize = _imageSize;
-          final ratio = imageSize == null || imageSize.height <= 0
-              ? 4 / 3
-              : imageSize.width / imageSize.height;
-          var width = constraints.maxWidth;
-          var height = width / ratio;
-          if (height > constraints.maxHeight) {
-            height = constraints.maxHeight;
-            width = height * ratio;
-          }
-          final boxSize = Size(width, height);
-          return Center(
-            child: SizedBox(
-              width: width,
-              height: height,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  Image.memory(
-                    _bytes,
-                    fit: BoxFit.cover,
-                    gaplessPlayback: true,
-                  ),
-                  CustomPaint(
-                    painter: AnnotationPainter(shapes: [..._shapes, ?_draft]),
-                  ),
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onPanStart: (details) =>
-                        _onStart(details.localPosition, boxSize),
-                    onPanUpdate: (details) =>
-                        _onUpdate(details.localPosition, boxSize),
-                    onPanEnd: (_) => _onEnd(),
-                    onTapUp: (details) =>
-                        _onTap(details.localPosition, boxSize),
-                  ),
-                  if (_issue != IssueType.none)
-                    Positioned(
-                      left: 9,
+    // 照片左右会留白（竖图尤其明显）：整块区域都能点，
+    // 点一下就把问题描述的键盘收起来，好继续在照片上标注
+    return GestureDetector(
+      key: const ValueKey('capture-photo-area'),
+      behavior: HitTestBehavior.opaque,
+      onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 10),
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(borderRadius: BorderRadius.circular(12)),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final imageSize = _imageSize;
+            final ratio = imageSize == null || imageSize.height <= 0
+                ? 4 / 3
+                : imageSize.width / imageSize.height;
+            var width = constraints.maxWidth;
+            var height = width / ratio;
+            if (height > constraints.maxHeight) {
+              height = constraints.maxHeight;
+              width = height * ratio;
+            }
+            final boxSize = Size(width, height);
+            return Center(
+              child: SizedBox(
+                width: width,
+                height: height,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.memory(
+                      _bytes,
+                      fit: BoxFit.cover,
+                      gaplessPlayback: true,
+                    ),
+                    CustomPaint(
+                      painter: AnnotationPainter(shapes: [..._shapes, ?_draft]),
+                    ),
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onPanStart: (details) =>
+                          _onStart(details.localPosition, boxSize),
+                      onPanUpdate: (details) =>
+                          _onUpdate(details.localPosition, boxSize),
+                      onPanEnd: (_) => _onEnd(),
+                      onTapUp: (details) =>
+                          _onTap(details.localPosition, boxSize),
+                    ),
+                    if (_issue != IssueType.none)
+                      Positioned(
+                        left: 9,
+                        top: 9,
+                        child: ZPill(
+                          label: '${_issue.emoji} ${_issue.label}',
+                          background: const Color(0xE6E04145),
+                          foreground: Colors.white,
+                        ),
+                      ),
+                    const Positioned(
+                      right: 9,
                       top: 9,
                       child: ZPill(
-                        label: '${_issue.emoji} ${_issue.label}',
-                        background: const Color(0xE6E04145),
+                        label: '已定位',
+                        background: Color(0xB80A0F1A),
                         foreground: Colors.white,
+                        icon: Icons.my_location_rounded,
                       ),
                     ),
-                  const Positioned(
-                    right: 9,
-                    top: 9,
-                    child: ZPill(
-                      label: '已定位',
-                      background: Color(0xB80A0F1A),
-                      foreground: Colors.white,
-                      icon: Icons.my_location_rounded,
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: ZWatermarkBar(lines: _watermarkLines),
                     ),
-                  ),
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: ZWatermarkBar(lines: _watermarkLines),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }

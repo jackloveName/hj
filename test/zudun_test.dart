@@ -39,6 +39,7 @@ import 'package:zudun/theme/tokens.dart';
 import 'package:zudun/ui/app_update_dialog.dart';
 import 'package:zudun/ui/auth/login_page.dart';
 import 'package:zudun/ui/compare/compare_page.dart';
+import 'package:zudun/ui/evidence/capture_page.dart';
 import 'package:zudun/ui/evidence/evidence_rooms_page.dart';
 import 'package:zudun/ui/evidence/photo_detail_page.dart';
 import 'package:zudun/ui/evidence/room_album_page.dart';
@@ -1383,7 +1384,6 @@ void main() {
         DateTime(2026, 10, 9),
       );
     });
-
   });
 
   group('抄表：上月读数按自然月带入', () {
@@ -4600,11 +4600,7 @@ void groupWidgets() {
     // 点房间名也要能高亮（以前只有照片区域可点，点「卫生间」没反应）
     await tester.tap(find.text('卫生间'));
     await tester.pump();
-    expect(
-      find.text('为「卫生间」拍照取证'),
-      findsOneWidget,
-      reason: '点房间名也要高亮',
-    );
+    expect(find.text('为「卫生间」拍照取证'), findsOneWidget, reason: '点房间名也要高亮');
 
     // 点有照片的房间：先高亮这间，再打开相册
     await tester.tap(find.text('阳台'));
@@ -4615,19 +4611,68 @@ void groupWidgets() {
     Navigator.of(tester.element(find.byType(RoomAlbumPage))).pop();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
-    expect(
-      find.text('为「阳台」拍照取证'),
-      findsOneWidget,
-      reason: '点哪间，回来就还高亮哪间',
-    );
+    expect(find.text('为「阳台」拍照取证'), findsOneWidget, reason: '点哪间，回来就还高亮哪间');
 
     // 再点卫生间，高亮跟着走
     await tester.tap(find.text('卫生间'));
     await tester.pump();
-    expect(
-      find.text('为「卫生间」拍照取证'),
-      findsOneWidget,
+    expect(find.text('为「卫生间」拍照取证'), findsOneWidget);
+  });
+
+  testWidgets('退租取证：点照片或照片左右空白都能收起问题描述键盘', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      await repository.addProperty(buildProperty());
+    });
+    final bytes = Uint8List.fromList(
+      img.encodeJpg(img.Image(width: 60, height: 120)),
     );
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(
+          theme: ZTheme.light(),
+          home: CapturePage(
+            propertyId: 'p1',
+            room: '客厅',
+            phase: PhotoPhase.moveOut,
+            bytes: bytes,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    // 点问题描述框，键盘弹出
+    await tester.tap(find.byType(TextField).first);
+    await tester.pump();
+    expect(tester.testTextInput.isVisible, isTrue);
+
+    // 点照片本身：收回键盘
+    await tester.tap(
+      find.byWidgetPredicate(
+        (widget) => widget is GestureDetector && widget.onPanStart != null,
+      ),
+    );
+    await tester.pump();
+    expect(tester.testTextInput.isVisible, isFalse);
+
+    // 再点开键盘，点照片左右留白（竖图两侧）也要收回
+    await tester.tap(find.byType(TextField).first);
+    await tester.pump();
+    expect(tester.testTextInput.isVisible, isTrue);
+    final area = tester.getRect(
+      find.byKey(const ValueKey('capture-photo-area')),
+    );
+    await tester.tapAt(Offset(area.left + 6, area.center.dy));
+    await tester.pump();
+    expect(tester.testTextInput.isVisible, isFalse, reason: '点照片左右空白也要收键盘');
   });
 
   testWidgets('首页：拍完取证能在「最近取证」看到照片，不只是个数字', (tester) async {
@@ -6641,17 +6686,11 @@ void groupWidgets() {
       reason: '押金继续流转，房源还是已退租',
     );
     // 已退还 = 押金流程到头了：一个可选目标都不剩，整段选择不显示
-    expect(
-      find.byType(ChoiceChip),
-      findsNothing,
-      reason: '押金已经退到手，没有能操作的状态了',
-    );
+    expect(find.byType(ChoiceChip), findsNothing, reason: '押金已经退到手，没有能操作的状态了');
     expect(find.textContaining('押金流程走完了'), findsOneWidget);
   });
 
-  testWidgets('押金追踪：纠纷中不能改回「已缴纳」，只能往「部分扣除 / 已退还」走', (
-    tester,
-  ) async {
+  testWidgets('押金追踪：纠纷中不能改回「已缴纳」，只能往「部分扣除 / 已退还」走', (tester) async {
     tester.view.physicalSize = const Size(390, 1200);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -6768,11 +6807,7 @@ void groupWidgets() {
     expect(tester.takeException(), isNull);
 
     // 押金部分扣除已经记过了：这里只回显，不再摆「房东退了吗」和金额输入
-    expect(
-      find.text('房东退了吗'),
-      findsNothing,
-      reason: '两处都能改会互相覆盖，用户也得多填一次',
-    );
+    expect(find.text('房东退了吗'), findsNothing, reason: '两处都能改会互相覆盖，用户也得多填一次');
     expect(find.text('押金退还 ¥5,000 · 扣除 ¥3,000'), findsOneWidget);
     expect(find.text('扣除理由：墙面有污渍'), findsOneWidget);
     expect(find.text('去押金追踪'), findsOneWidget);
@@ -6908,17 +6943,9 @@ void groupWidgets() {
     );
     expect(find.text('当前房源暂不需要押金'), findsOneWidget);
     expect(find.text('改成需要押金'), findsOneWidget);
-    expect(
-      find.text('更新押金状态'),
-      findsNothing,
-      reason: '还没有押金，别摆状态选择',
-    );
+    expect(find.text('更新押金状态'), findsNothing, reason: '还没有押金，别摆状态选择');
     expect(find.text('金额明细'), findsNothing, reason: '还没有押金，没有明细可看');
-    expect(
-      find.text('编辑金额'),
-      findsNothing,
-      reason: '编辑金额按钮已经去掉了',
-    );
+    expect(find.text('编辑金额'), findsNothing, reason: '编辑金额按钮已经去掉了');
 
     // 填金额 → 改成需要押金，那两段才出现
     await tester.enterText(find.byType(TextField).first, '6000');
@@ -6943,11 +6970,7 @@ void groupWidgets() {
     expect(saved.deposit.logs.last.note, contains('登记押金金额'));
     expect(find.text('¥6,000'), findsWidgets, reason: '卡片与金额明细都要跟着更新');
     expect(find.text('已缴纳'), findsWidgets);
-    expect(
-      find.text('更新押金状态'),
-      findsOneWidget,
-      reason: '改成需要押金之后，状态选择才出现',
-    );
+    expect(find.text('更新押金状态'), findsOneWidget, reason: '改成需要押金之后，状态选择才出现');
     expect(find.text('金额明细'), findsOneWidget);
     expect(
       find.text('生成对比报告'),
@@ -7245,21 +7268,13 @@ void groupWidgets() {
     // 明细里不再出现扣款金额，过程仍留在状态变更记录里
     expect(find.textContaining('¥3,000'), findsNothing);
     expect(find.textContaining('墙面有污渍'), findsNothing);
-    expect(
-      find.text('维权备注'),
-      findsNothing,
-      reason: '金额明细里不再有这一行',
-    );
+    expect(find.text('维权备注'), findsNothing, reason: '金额明细里不再有这一行');
     expect(
       find.textContaining('原维权备注：入住照片里墙面是干净的'),
       findsOneWidget,
       reason: '原内容写进状态变更记录，信息不丢',
     );
-    expect(
-      find.text('手动更新状态'),
-      findsNothing,
-      reason: '状态变更记录里不写这句泛化文案',
-    );
+    expect(find.text('手动更新状态'), findsNothing, reason: '状态变更记录里不写这句泛化文案');
   });
 
   testWidgets('押金追踪：选部分扣除要填扣款信息，保存后页面立刻更新', (tester) async {
@@ -7299,16 +7314,8 @@ void groupWidgets() {
     expect(find.text('押金部分扣除'), findsOneWidget);
     expect(find.text('扣除多少钱'), findsOneWidget);
     expect(find.text('扣除理由'), findsOneWidget);
-    expect(
-      find.text('维权备注'),
-      findsWidgets,
-      reason: '弹层里有这个输入框（页面金额明细里也有同名行）',
-    );
-    expect(
-      find.byType(TextFormField),
-      findsNWidgets(3),
-      reason: '弹层里就这三个输入框',
-    );
+    expect(find.text('维权备注'), findsWidgets, reason: '弹层里有这个输入框（页面金额明细里也有同名行）');
+    expect(find.byType(TextFormField), findsNWidgets(3), reason: '弹层里就这三个输入框');
 
     await tester.enterText(find.byType(TextFormField).at(0), '2000');
     await tester.enterText(find.byType(TextFormField).at(1), '墙面有污渍');
@@ -7590,11 +7597,7 @@ void groupWidgets() {
 
     // 只有一套在租：也得看得出这一页的账是哪套房的
     expect(find.text('翠屏里 3 栋 502'), findsWidgets);
-    expect(
-      find.text('切换房源'),
-      findsNothing,
-      reason: '只有一套在租，没什么可切的',
-    );
+    expect(find.text('切换房源'), findsNothing, reason: '只有一套在租，没什么可切的');
   });
 
   testWidgets('费用：切换房源只列租住中的', (tester) async {
@@ -9981,11 +9984,7 @@ void groupWidgets() {
       serverPayload,
       platform: TargetPlatform.android,
     );
-    expect(
-      android,
-      isNull,
-      reason: '安卓那组是 updateType=0（后台关掉了更新提示），什么都不该弹',
-    );
+    expect(android, isNull, reason: '安卓那组是 updateType=0（后台关掉了更新提示），什么都不该弹');
     final androidOn = parseAppUpdate({
       ...serverPayload,
       'androidUpdateType': 1,
