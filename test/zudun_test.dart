@@ -4559,7 +4559,7 @@ void groupWidgets() {
     );
   });
 
-  testWidgets('取证房间列表：看完相册返回后高亮第一个缺照片的房间', (tester) async {
+  testWidgets('取证房间列表：点哪间高亮哪间，点房间名也生效', (tester) async {
     tester.view.physicalSize = const Size(390, 1010);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -4593,15 +4593,21 @@ void groupWidgets() {
     );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
-    final balcony = find
-        .ancestor(of: find.text('阳台'), matching: find.byType(Column))
-        .first;
-    // 有照片时单击是进相册，先长按把阳台选成「为这间拍照」
-    await tester.longPress(balcony);
-    await tester.pump();
-    expect(find.text('为「阳台」拍照取证'), findsOneWidget);
 
-    await tester.tap(balcony);
+    // 还没点的时候默认第一间
+    expect(find.text('为「客厅」拍照取证'), findsOneWidget);
+
+    // 点房间名也要能高亮（以前只有照片区域可点，点「卫生间」没反应）
+    await tester.tap(find.text('卫生间'));
+    await tester.pump();
+    expect(
+      find.text('为「卫生间」拍照取证'),
+      findsOneWidget,
+      reason: '点房间名也要高亮',
+    );
+
+    // 点有照片的房间：先高亮这间，再打开相册
+    await tester.tap(find.text('阳台'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.byType(RoomAlbumPage), findsOneWidget);
@@ -4609,12 +4615,18 @@ void groupWidgets() {
     Navigator.of(tester.element(find.byType(RoomAlbumPage))).pop();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
+    expect(
+      find.text('为「阳台」拍照取证'),
+      findsOneWidget,
+      reason: '点哪间，回来就还高亮哪间',
+    );
 
-    // 阳台看完了，剩下缺照片的房间里最靠前的是卫生间
+    // 再点卫生间，高亮跟着走
+    await tester.tap(find.text('卫生间'));
+    await tester.pump();
     expect(
       find.text('为「卫生间」拍照取证'),
       findsOneWidget,
-      reason: '看完相册回来不能还停在阳台',
     );
   });
 

@@ -76,15 +76,7 @@ class _EvidenceRoomsPageState extends State<EvidenceRoomsPage> {
                   emphasize: true,
                   padding: EdgeInsets.zero,
                   labelOf: (value) => value.label,
-                  onChanged: (value) => setState(() {
-                    _phase = value;
-                    // 切换阶段后照片数量完全不同，重新按「缺照片的房间」选
-                    _selectedRoom = _suggestRoom(
-                      repository: repository,
-                      phase: value,
-                      fallback: _selectedRoom,
-                    );
-                  }),
+                  onChanged: (value) => setState(() => _phase = value),
                 ),
                 const SizedBox(height: 12),
                 const ZHintBar(text: '每张照片自动加 时间 / 位置 / 房间 水印，不可编辑，仅可追加。'),
@@ -111,12 +103,14 @@ class _EvidenceRoomsPageState extends State<EvidenceRoomsPage> {
                         ),
                         thumbRef: _thumb(repository, property.id, rooms[i]),
                         selected: _selectedRoom == i,
-                        onTap: () => setState(() => _selectedRoom = i),
-                        onOpen: () => _openAlbum(
+                        onSelect: () => setState(() => _selectedRoom = i),
+                        onOpen: () => zPush(
                           context,
-                          repository,
-                          property.id,
-                          rooms[i],
+                          RoomAlbumPage(
+                            propertyId: property.id,
+                            room: rooms[i],
+                            phase: _phase,
+                          ),
                         ),
                       ),
                     if (editable)
@@ -138,52 +132,6 @@ class _EvidenceRoomsPageState extends State<EvidenceRoomsPage> {
     return photos.isEmpty ? null : photos.first.thumbRef;
   }
 
-  /// 看完整间房回来之后，高亮挪到「第一个还缺照片的房间」。
-  /// 所有房间都有照片时保持当前选择。
-  int _suggestRoom({
-    required Repository repository,
-    required PhotoPhase phase,
-    required int fallback,
-  }) {
-    final property = repository.propertyById(widget.propertyId);
-    if (property == null) return 0;
-    final rooms = property.allRooms;
-    for (var i = 0; i < rooms.length; i++) {
-      if (repository.photoCountOf(
-            property.id,
-            phase: phase,
-            room: rooms[i],
-          ) ==
-          0) {
-        return i;
-      }
-    }
-    return fallback.clamp(0, rooms.length - 1);
-  }
-
-  Future<void> _openAlbum(
-    BuildContext context,
-    Repository repository,
-    String propertyId,
-    String room,
-  ) async {
-    await zPush(
-      context,
-      RoomAlbumPage(
-        propertyId: propertyId,
-        room: room,
-        phase: _phase,
-      ),
-    );
-    if (!mounted) return;
-    final next = _suggestRoom(
-      repository: repository,
-      phase: _phase,
-      fallback: _selectedRoom,
-    );
-    setState(() => _selectedRoom = next);
-  }
-
   Future<void> _capture(
     BuildContext context,
     Repository repository,
@@ -200,13 +148,6 @@ class _EvidenceRoomsPageState extends State<EvidenceRoomsPage> {
         bytes: bytes,
       ),
     );
-    if (!mounted) return;
-    final next = _suggestRoom(
-      repository: repository,
-      phase: _phase,
-      fallback: _selectedRoom,
-    );
-    setState(() => _selectedRoom = next);
   }
 
   Future<void> _addRoom(
@@ -252,7 +193,7 @@ class _RoomTile extends StatelessWidget {
     required this.count,
     required this.thumbRef,
     required this.selected,
-    required this.onTap,
+    required this.onSelect,
     required this.onOpen,
   });
 
@@ -260,17 +201,22 @@ class _RoomTile extends StatelessWidget {
   final int count;
   final String? thumbRef;
   final bool selected;
-  final VoidCallback onTap;
+  final VoidCallback onSelect;
   final VoidCallback onOpen;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Expanded(
-          child: GestureDetector(
-            onTap: count > 0 ? onOpen : onTap,
-            onLongPress: onTap,
+    // 整块（照片 + 房间名）都可点：点哪间就高亮哪间；
+    // 已经拍过的房间顺带打开相册
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        onSelect();
+        if (count > 0) onOpen();
+      },
+      child: Column(
+        children: [
+          Expanded(
             child: Container(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(Z.rMd),
@@ -288,19 +234,19 @@ class _RoomTile extends StatelessWidget {
               ),
             ),
           ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          room,
-          style: TextStyle(
-            fontFamily: Z.font,
-            fontFamilyFallback: Z.fallback,
-            fontSize: 11.5,
-            fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-            color: selected ? Z.brand : Z.ink3,
+          const SizedBox(height: 4),
+          Text(
+            room,
+            style: TextStyle(
+              fontFamily: Z.font,
+              fontFamilyFallback: Z.fallback,
+              fontSize: 11.5,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+              color: selected ? Z.brand : Z.ink3,
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
