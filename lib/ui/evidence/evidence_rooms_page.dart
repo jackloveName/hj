@@ -76,7 +76,15 @@ class _EvidenceRoomsPageState extends State<EvidenceRoomsPage> {
                   emphasize: true,
                   padding: EdgeInsets.zero,
                   labelOf: (value) => value.label,
-                  onChanged: (value) => setState(() => _phase = value),
+                  onChanged: (value) => setState(() {
+                    _phase = value;
+                    // 切换阶段后照片数量完全不同，重新按「缺照片的房间」选
+                    _selectedRoom = _suggestRoom(
+                      repository: repository,
+                      phase: value,
+                      fallback: _selectedRoom,
+                    );
+                  }),
                 ),
                 const SizedBox(height: 12),
                 const ZHintBar(text: '每张照片自动加 时间 / 位置 / 房间 水印，不可编辑，仅可追加。'),
@@ -104,13 +112,11 @@ class _EvidenceRoomsPageState extends State<EvidenceRoomsPage> {
                         thumbRef: _thumb(repository, property.id, rooms[i]),
                         selected: _selectedRoom == i,
                         onTap: () => setState(() => _selectedRoom = i),
-                        onOpen: () => zPush(
+                        onOpen: () => _openAlbum(
                           context,
-                          RoomAlbumPage(
-                            propertyId: property.id,
-                            room: rooms[i],
-                            phase: _phase,
-                          ),
+                          repository,
+                          property.id,
+                          rooms[i],
                         ),
                       ),
                     if (editable)
@@ -132,6 +138,52 @@ class _EvidenceRoomsPageState extends State<EvidenceRoomsPage> {
     return photos.isEmpty ? null : photos.first.thumbRef;
   }
 
+  /// 看完整间房回来之后，高亮挪到「第一个还缺照片的房间」。
+  /// 所有房间都有照片时保持当前选择。
+  int _suggestRoom({
+    required Repository repository,
+    required PhotoPhase phase,
+    required int fallback,
+  }) {
+    final property = repository.propertyById(widget.propertyId);
+    if (property == null) return 0;
+    final rooms = property.allRooms;
+    for (var i = 0; i < rooms.length; i++) {
+      if (repository.photoCountOf(
+            property.id,
+            phase: phase,
+            room: rooms[i],
+          ) ==
+          0) {
+        return i;
+      }
+    }
+    return fallback.clamp(0, rooms.length - 1);
+  }
+
+  Future<void> _openAlbum(
+    BuildContext context,
+    Repository repository,
+    String propertyId,
+    String room,
+  ) async {
+    await zPush(
+      context,
+      RoomAlbumPage(
+        propertyId: propertyId,
+        room: room,
+        phase: _phase,
+      ),
+    );
+    if (!mounted) return;
+    final next = _suggestRoom(
+      repository: repository,
+      phase: _phase,
+      fallback: _selectedRoom,
+    );
+    setState(() => _selectedRoom = next);
+  }
+
   Future<void> _capture(
     BuildContext context,
     Repository repository,
@@ -148,6 +200,13 @@ class _EvidenceRoomsPageState extends State<EvidenceRoomsPage> {
         bytes: bytes,
       ),
     );
+    if (!mounted) return;
+    final next = _suggestRoom(
+      repository: repository,
+      phase: _phase,
+      fallback: _selectedRoom,
+    );
+    setState(() => _selectedRoom = next);
   }
 
   Future<void> _addRoom(

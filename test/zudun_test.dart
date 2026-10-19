@@ -4559,6 +4559,65 @@ void groupWidgets() {
     );
   });
 
+  testWidgets('取证房间列表：看完相册返回后高亮第一个缺照片的房间', (tester) async {
+    tester.view.physicalSize = const Size(390, 1010);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      await repository.addProperty(buildProperty());
+      // 除了卫生间，其余房间都拍过；阳台有一张，待会儿进相册再退出
+      for (final room in ['客厅', '主卧', '次卧', '厨房', '阳台']) {
+        await repository.addPhoto(
+          EvidencePhoto(
+            id: 'ph-$room',
+            propertyId: 'p1',
+            room: room,
+            imageRef: 'media:p1/$room.jpg',
+            thumbRef: 'media:p1/$room.thumb.jpg',
+            timestamp: DateTime(2026, 10, 15),
+          ),
+        );
+      }
+    });
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(
+          theme: ZTheme.light(),
+          home: const EvidenceRoomsPage(propertyId: 'p1'),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    final balcony = find
+        .ancestor(of: find.text('阳台'), matching: find.byType(Column))
+        .first;
+    // 有照片时单击是进相册，先长按把阳台选成「为这间拍照」
+    await tester.longPress(balcony);
+    await tester.pump();
+    expect(find.text('为「阳台」拍照取证'), findsOneWidget);
+
+    await tester.tap(balcony);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(RoomAlbumPage), findsOneWidget);
+
+    Navigator.of(tester.element(find.byType(RoomAlbumPage))).pop();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+
+    // 阳台看完了，剩下缺照片的房间里最靠前的是卫生间
+    expect(
+      find.text('为「卫生间」拍照取证'),
+      findsOneWidget,
+      reason: '看完相册回来不能还停在阳台',
+    );
+  });
+
   testWidgets('首页：拍完取证能在「最近取证」看到照片，不只是个数字', (tester) async {
     tester.view.physicalSize = const Size(390, 1400);
     tester.view.devicePixelRatio = 1;
