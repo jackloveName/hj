@@ -170,7 +170,7 @@ class _EvidenceExportPageState extends State<EvidenceExportPage> {
       );
       if (!mounted) return;
       setState(() => _status = '已导出：$ref');
-      zToast(context, '照片包已导出');
+      zToast(context, '已导出');
     } catch (error) {
       if (mounted) setState(() => _status = '打包失败：$error');
     } finally {

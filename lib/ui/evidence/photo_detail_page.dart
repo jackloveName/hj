@@ -184,7 +184,7 @@ class PhotoDetailPage extends StatelessWidget {
                       color: Z.danger,
                     ),
                     label: const Text(
-                      '删除照片（需二次确认）',
+                      '删除照片',
                       style: TextStyle(color: Z.danger),
                     ),
                   ),
@@ -313,11 +313,22 @@ class _AnnotateSheetState extends State<_AnnotateSheet> {
   AnnotationShape? _draft;
   String _tool = 'circle';
 
+  /// 四个工具：圆圈 / 箭头 / 画笔 / 文字
+  static const List<(String, IconData, String)> _tools = [
+    ('circle', Icons.circle_outlined, '圆圈'),
+    ('arrow', Icons.north_east_rounded, '箭头'),
+    ('free', Icons.gesture_rounded, '画笔'),
+    ('text', Icons.text_fields_rounded, '文字'),
+  ];
+
   @override
   Widget build(BuildContext context) {
     final ratio = widget.photo.width > 0 && widget.photo.height > 0
         ? widget.photo.width / widget.photo.height
         : 4 / 3;
+    // 照片区域封顶；外面的 Flexible 再兜一层，竖图 + 小屏时也不会把
+    // 标题、工具和底部按钮顶出屏幕
+    final maxImageHeight = MediaQuery.sizeOf(context).height * 0.5;
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -334,62 +345,85 @@ class _AnnotateSheetState extends State<_AnnotateSheet> {
                       : () => setState(() => _shapes.removeLast()),
                   child: const Text('撤销'),
                 ),
-                FilledButton(
-                  onPressed: () => Navigator.of(context).pop(_shapes),
-                  child: const Text('保存'),
-                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            // 工具栏：4 个 chip 在窄屏上会挤爆一行，用 Wrap 换行
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                for (final tool in _tools)
+                  ChoiceChip(
+                    avatar: Icon(tool.$2, size: 14),
+                    label: Text(tool.$3),
+                    selected: _tool == tool.$1,
+                    onSelected: (_) {
+                      // 选工具时收起键盘：刚看完问题描述就直接在照片上画
+                      FocusManager.instance.primaryFocus?.unfocus();
+                      setState(() => _tool = tool.$1);
+                    },
+                  ),
               ],
             ),
             const SizedBox(height: 10),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(Z.rMd),
-              child: AspectRatio(
-                aspectRatio: ratio,
-                child: LayoutBuilder(
-                  builder: (context, constraints) => Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      ZPhoto(
-                        ref: widget.photo.imageRef,
-                        fit: BoxFit.cover,
-                        radius: 0,
-                      ),
-                      CustomPaint(
-                        painter: AnnotationPainter(
-                          shapes: [..._shapes, ?_draft],
+            Flexible(
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxHeight: maxImageHeight),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(Z.rMd),
+                    child: AspectRatio(
+                      aspectRatio: ratio,
+                      child: LayoutBuilder(
+                        builder: (context, constraints) => Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            ZPhoto(
+                              ref: widget.photo.imageRef,
+                              fit: BoxFit.cover,
+                              radius: 0,
+                            ),
+                            CustomPaint(
+                              painter: AnnotationPainter(
+                                shapes: [..._shapes, ?_draft],
+                              ),
+                            ),
+                            GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onPanStart: (d) =>
+                                  _start(d.localPosition, constraints.biggest),
+                              onPanUpdate: (d) =>
+                                  _update(d.localPosition, constraints.biggest),
+                              onPanEnd: (_) => _end(),
+                              onTapUp: (d) =>
+                                  _tap(d.localPosition, constraints.biggest),
+                            ),
+                          ],
                         ),
                       ),
-                      GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onPanStart: (d) =>
-                            _start(d.localPosition, constraints.biggest),
-                        onPanUpdate: (d) =>
-                            _update(d.localPosition, constraints.biggest),
-                        onPanEnd: (_) => _end(),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             Row(
               children: [
-                for (final tool in const [
-                  ('circle', Icons.circle_outlined, '圆圈'),
-                  ('arrow', Icons.north_east_rounded, '箭头'),
-                  ('rect', Icons.crop_square_rounded, '矩形'),
-                  ('free', Icons.gesture_rounded, '画笔'),
-                ])
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      avatar: Icon(tool.$2, size: 14),
-                      label: Text(tool.$3),
-                      selected: _tool == tool.$1,
-                      onSelected: (_) => setState(() => _tool = tool.$1),
-                    ),
+                Expanded(
+                  child: ZButton(
+                    label: '取消',
+                    style: ZButtonStyle.ghost,
+                    onTap: () => Navigator.of(context).pop(),
                   ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ZButton(
+                    label: '保存',
+                    onTap: () => Navigator.of(context).pop(_shapes),
+                  ),
+                ),
               ],
             ),
           ],
@@ -403,13 +437,59 @@ class _AnnotateSheetState extends State<_AnnotateSheet> {
     (local.dy / size.height).clamp(0.0, 1.0),
   );
 
-  void _start(Offset local, Size size) => setState(() {
-    _draft = AnnotationShape(
-      type: _tool,
-      points: [_norm(local, size)],
-      colorValue: 0xFF2F6BFF,
+  void _start(Offset local, Size size) {
+    FocusManager.instance.primaryFocus?.unfocus();
+    // 文字是「点一下放上去」，不跟着手指拖
+    if (_tool == 'text') return;
+    setState(() {
+      _draft = AnnotationShape(
+        type: _tool,
+        points: [_norm(local, size)],
+        colorValue: 0xFF2F6BFF,
+      );
+    });
+  }
+
+  /// 文字工具：点图片上某个位置，输入内容后放在那里
+  Future<void> _tap(Offset local, Size size) async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    if (_tool != 'text') return;
+    // 弹窗里不用 controller：退场动画期间 dispose 会让输入框重建时红屏
+    var typed = '';
+    final text = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('添加文字标注'),
+        content: TextField(
+          autofocus: true,
+          decoration: const InputDecoration(hintText: '如：墙面裂缝 12cm'),
+          onChanged: (value) => typed = value,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text('取消', style: TextStyle(color: Z.ink3)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(typed.trim()),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
     );
-  });
+    if (text == null || text.isEmpty || !mounted) return;
+    final point = _norm(local, size);
+    setState(() {
+      _shapes.add(
+        AnnotationShape(
+          type: 'text',
+          points: [point],
+          text: text,
+          colorValue: 0xFF2F6BFF,
+        ),
+      );
+    });
+  }
 
   void _update(Offset local, Size size) {
     final draft = _draft;

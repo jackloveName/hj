@@ -40,6 +40,7 @@ import 'package:zudun/ui/app_update_dialog.dart';
 import 'package:zudun/ui/auth/login_page.dart';
 import 'package:zudun/ui/compare/compare_page.dart';
 import 'package:zudun/ui/evidence/evidence_rooms_page.dart';
+import 'package:zudun/ui/evidence/photo_detail_page.dart';
 import 'package:zudun/ui/evidence/room_album_page.dart';
 import 'package:zudun/ui/expense/deposit_page.dart';
 import 'package:zudun/ui/expense/expense_page.dart';
@@ -5025,6 +5026,47 @@ void groupWidgets() {
     expect(find.text('入住取证'), findsWidgets, reason: '要进到入住取证页');
   });
 
+  testWidgets('每月交租日：小屏上弹层不溢出', (tester) async {
+    // 小屏 + 大字：28 个日期以前会超过默认的半个屏幕高度
+    tester.view.physicalSize = const Size(320, 568);
+    tester.view.devicePixelRatio = 1;
+    tester.platformDispatcher.textScaleFactorTestValue = 1.2;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(
+          theme: ZTheme.light(),
+          home: const PropertyEditPage(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).first, '望京 SOHO 公寓 A 座 1802');
+    await tester.enterText(find.byType(TextField).at(1), '北京市朝阳区望京街 10 号院');
+    await tester.tap(find.text('下一步'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, '张建国');
+    await tester.tap(find.text('下一步'));
+    await tester.pumpAndSettle();
+    // 小屏上「每月交租日」在下面，先滚到它
+    final dueField = find.textContaining('每月 ');
+    for (var i = 0; i < 8 && dueField.evaluate().isEmpty; i++) {
+      await tester.drag(find.byType(Scrollable).first, const Offset(0, -200));
+      await tester.pumpAndSettle();
+    }
+    expect(dueField, findsWidgets, reason: '要能滚到「每月交租日」');
+    await tester.tap(dueField.first);
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull, reason: '弹层不能溢出');
+    expect(find.text('每月几号交租'), findsOneWidget);
+  });
+
   testWidgets('每月交租日：点开是紧凑的数字格，不是占满屏的下拉菜单', (tester) async {
     tester.view.physicalSize = const Size(430, 1600);
     tester.view.devicePixelRatio = 1;
@@ -5977,7 +6019,7 @@ void groupWidgets() {
     await tester.pumpAndSettle();
     expect(find.textContaining('删除「翠屏里 3 栋 502」'), findsOneWidget);
     expect(find.textContaining('1 张照片'), findsOneWidget, reason: '要说清会删掉什么');
-    expect(find.textContaining('先导出对比报告或照片包'), findsOneWidget);
+    expect(find.textContaining('先导出对比报告'), findsOneWidget);
 
     // 点「再想想」什么都不动
     await tester.tap(find.text('再想想'));
@@ -6349,21 +6391,14 @@ void groupWidgets() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
 
-    // 当前状态那颗 chip 的文案是「已退还 · 当前」，所以按前缀找
-    ChoiceChip chipOf(String label) => tester.widget<ChoiceChip>(
-      find.byWidgetPredicate(
-        (widget) =>
-            widget is ChoiceChip &&
-            widget.label is Text &&
-            ((widget.label as Text).data ?? '').startsWith(label),
-      ),
-    );
+    // 合同里没填押金金额：谈不上「扣了多少」，这个目标直接不显示
     expect(
-      chipOf('部分扣除').onSelected,
-      isNull,
-      reason: '合同里没填押金金额，谈不上扣了多少',
+      find.widgetWithText(ChoiceChip, '部分扣除'),
+      findsNothing,
+      reason: '不能操作的状态不再摆出来',
     );
-    expect(chipOf('待退还').onSelected, isNotNull);
+    expect(find.widgetWithText(ChoiceChip, '待退还'), findsOneWidget);
+    expect(find.widgetWithText(ChoiceChip, '已退还'), findsOneWidget);
   });
 
   testWidgets('退租：确认框点「回去补」就不动房源', (tester) async {
@@ -6486,18 +6521,10 @@ void groupWidgets() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
 
-    // 当前状态那颗 chip 的文案是「待退还 · 当前」/「已退还 · 当前」，按前缀找
-    ChoiceChip chipOf(String label) => tester.widget<ChoiceChip>(
-      find.byWidgetPredicate(
-        (widget) =>
-            widget is ChoiceChip &&
-            widget.label is Text &&
-            ((widget.label as Text).data ?? '').startsWith(label),
-      ),
-    );
+    // 不能点的状态直接不显示：只剩「部分扣除 / 已退还」两个目标
     expect(
-      chipOf('已缴纳').onSelected,
-      isNull,
+      find.widgetWithText(ChoiceChip, '已缴纳'),
+      findsNothing,
       reason: '押金状态只许往前走：待退还之后不能再改回已缴纳',
     );
     expect(
@@ -6505,10 +6532,14 @@ void groupWidgets() {
       findsNothing,
       reason: '「要不要押金」不在状态选择里（那是页顶那一问的事）',
     );
-    expect(chipOf('已退还').onSelected, isNotNull, reason: '押金继续往后走（退到手）还是要能记账');
     expect(
-      chipOf('部分扣除').onSelected,
-      isNotNull,
+      find.widgetWithText(ChoiceChip, '已退还'),
+      findsOneWidget,
+      reason: '押金继续往后走（退到手）还要能记账',
+    );
+    expect(
+      find.widgetWithText(ChoiceChip, '部分扣除'),
+      findsOneWidget,
       reason: '待退还 → 部分扣除 是往前走，允许',
     );
     expect(find.textContaining('只能继续往后走'), findsOneWidget);
@@ -6538,14 +6569,12 @@ void groupWidgets() {
       PropertyStatus.ended,
       reason: '押金继续流转，房源还是已退租',
     );
-    // 已退还 = 押金流程到头了：四个状态都不能再点
-    for (final label in ['已缴纳', '待退还', '部分扣除', '已退还']) {
-      expect(
-        chipOf(label).onSelected,
-        isNull,
-        reason: '押金已经退到手，「$label」不该还能点',
-      );
-    }
+    // 已退还 = 押金流程到头了：一个可选目标都不剩，整段选择不显示
+    expect(
+      find.byType(ChoiceChip),
+      findsNothing,
+      reason: '押金已经退到手，没有能操作的状态了',
+    );
     expect(find.textContaining('押金流程走完了'), findsOneWidget);
   });
 
@@ -6583,11 +6612,10 @@ void groupWidgets() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
 
-    ChoiceChip chipOf(String label) =>
-        tester.widget<ChoiceChip>(find.widgetWithText(ChoiceChip, label));
+    // 只能选「部分扣除 / 已退还」：其余目标直接不显示
     expect(
-      chipOf('已缴纳').onSelected,
-      isNull,
+      find.widgetWithText(ChoiceChip, '已缴纳'),
+      findsNothing,
       reason: '押金状态只许往前走：纠纷中也不能改回「已缴纳」',
     );
     expect(
@@ -6596,16 +6624,16 @@ void groupWidgets() {
       reason: '纠纷中的房子也不摆「无押金」——那是页顶那一问的事',
     );
     expect(
-      chipOf('待退还').onSelected,
-      isNull,
+      find.widgetWithText(ChoiceChip, '待退还'),
+      findsNothing,
       reason: '纠纷中回头选「待退还」没意义',
     );
     expect(
-      chipOf('部分扣除').onSelected,
-      isNotNull,
+      find.widgetWithText(ChoiceChip, '部分扣除'),
+      findsOneWidget,
       reason: '维权谈成的结果就是这两条：部分扣除 / 已退还',
     );
-    expect(chipOf('已退还').onSelected, isNotNull);
+    expect(find.widgetWithText(ChoiceChip, '已退还'), findsOneWidget);
     expect(
       find.textContaining('只能继续往后走'),
       findsOneWidget,
@@ -6857,6 +6885,302 @@ void groupWidgets() {
     );
   });
 
+  testWidgets('追加标注：四个工具、能取消、小屏不溢出', (tester) async {
+    // 小屏 + 竖图：以前照片 + 标题 + 一排工具会把弹层顶出屏幕
+    tester.view.physicalSize = const Size(320, 568);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      await repository.addProperty(buildProperty());
+      // 落一张真图：照片加载中有无限动画，没有字节时 pumpAndSettle 会超时
+      final bytes = Uint8List.fromList(
+        img.encodeJpg(img.Image(width: 64, height: 96)),
+      );
+      final imageRef = await repository.saveMedia(
+        bytes,
+        folder: 'p1',
+        name: 'ph1.jpg',
+      );
+      final thumbRef = await repository.saveMedia(
+        bytes,
+        folder: 'p1',
+        name: 'ph1.thumb.jpg',
+      );
+      await repository.addPhoto(
+        EvidencePhoto(
+          id: 'ph1',
+          propertyId: 'p1',
+          room: '客厅',
+          imageRef: imageRef,
+          thumbRef: thumbRef,
+          timestamp: DateTime(2026, 10, 15),
+          width: 1024,
+          height: 1536,
+          watermarked: true,
+        ),
+      );
+    });
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(
+          theme: ZTheme.light(),
+          home: const PhotoDetailPage(photoId: 'ph1'),
+        ),
+      ),
+    );
+    // 照片是异步读的：加载中有无限动画，等它读完再往下走
+    await tester.pump();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 300)),
+    );
+    await tester.pump(const Duration(milliseconds: 200));
+    // 小屏上按钮在列表下方，ListView 懒构建，得先滚到它
+    await tester.dragUntilVisible(
+      find.text('追加标注'),
+      find.byType(ListView),
+      const Offset(0, -200),
+    );
+    await tester.pump();
+    await tester.tap(find.text('追加标注'));
+    // 图片解码在测试里不会真正结束，别用 pumpAndSettle
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(tester.takeException(), isNull, reason: '弹层不能溢出屏幕');
+
+    for (final label in ['圆圈', '箭头', '画笔', '文字']) {
+      expect(find.text(label), findsOneWidget, reason: '四种工具都在');
+    }
+    expect(find.text('取消'), findsOneWidget);
+
+    // 取消：照片上的标注保持原样（什么都不保存）
+    await tester.tap(find.text('取消'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(repository.photosOf('p1').first.annotations, isEmpty);
+  });
+
+  testWidgets('追加标注：文字工具点照片能放一段文字', (tester) async {
+    tester.view.physicalSize = const Size(390, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      await repository.addProperty(buildProperty());
+      final bytes = Uint8List.fromList(
+        img.encodeJpg(img.Image(width: 64, height: 48)),
+      );
+      final imageRef = await repository.saveMedia(
+        bytes,
+        folder: 'p1',
+        name: 'ph1.jpg',
+      );
+      final thumbRef = await repository.saveMedia(
+        bytes,
+        folder: 'p1',
+        name: 'ph1.thumb.jpg',
+      );
+      await repository.addPhoto(
+        EvidencePhoto(
+          id: 'ph1',
+          propertyId: 'p1',
+          room: '客厅',
+          imageRef: imageRef,
+          thumbRef: thumbRef,
+          timestamp: DateTime(2026, 10, 15),
+          width: 1024,
+          height: 768,
+        ),
+      );
+    });
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(
+          theme: ZTheme.light(),
+          home: const PhotoDetailPage(photoId: 'ph1'),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 300)),
+    );
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.dragUntilVisible(
+      find.text('追加标注'),
+      find.byType(ListView),
+      const Offset(0, -200),
+    );
+    await tester.pump();
+    await tester.tap(find.text('追加标注'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    // 选「文字」，点一下照片 → 弹输入框
+    await tester.tap(find.text('文字'));
+    await tester.pump();
+    final canvas = find.byWidgetPredicate(
+      (widget) => widget is GestureDetector && widget.onPanStart != null,
+    );
+    await tester.tap(canvas);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('添加文字标注'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).first, '墙面裂缝 12cm');
+    await tester.pump();
+    await tester.tap(find.text('确定'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // 保存后这条文字标注落到照片上
+    await tester.tap(find.text('保存'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 300)),
+    );
+    await tester.pump();
+    final saved = repository.photosOf('p1').first.annotations;
+    expect(saved, hasLength(1));
+    expect(saved.first.type, 'text');
+    expect(saved.first.text, '墙面裂缝 12cm');
+  });
+
+  testWidgets('房源详情：没设封面但有取证照片时，头图用照片', (tester) async {
+    tester.view.physicalSize = const Size(390, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      // 没有 coverRef，但有入住取证照片
+      await repository.addProperty(buildProperty());
+      await repository.addPhoto(
+        EvidencePhoto(
+          id: 'ph1',
+          propertyId: 'p1',
+          room: '客厅',
+          imageRef: 'media:p1/ph1.jpg',
+          thumbRef: 'media:p1/ph1.thumb.jpg',
+          timestamp: DateTime(2026, 10, 15),
+        ),
+      );
+    });
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(
+          theme: ZTheme.light(),
+          home: const PropertyDetailPage(propertyId: 'p1'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    // 头图（页面第一张 ZPhoto）用的是照片，而不是内置默认图
+    expect(
+      tester.widget<ZPhoto>(find.byType(ZPhoto).first).ref,
+      'media:p1/ph1.thumb.jpg',
+      reason: '没设封面时用取证照片兜底',
+    );
+
+    // 设了封面就听封面的
+    await tester.runAsync(() async {
+      final property = repository.propertyById('p1')!;
+      await repository.updateProperty(
+        property.copyWith(coverRef: 'media:p1/picked.jpg'),
+      );
+    });
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<ZPhoto>(find.byType(ZPhoto).first).ref,
+      'media:p1/picked.jpg',
+    );
+  });
+
+  testWidgets('押金追踪：改成「已退还」后扣款金额与理由要清掉', (tester) async {
+    tester.view.physicalSize = const Size(390, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      // 先记成「部分扣除」：扣了 3000
+      final base = buildProperty();
+      await repository.addProperty(
+        base.copyWith(
+          deposit: base.deposit.copyWith(
+            status: DepositStatus.partiallyDeducted,
+            deductedAmount: 3000,
+            deductReason: '墙面有污渍',
+            returnedAmount: 5000,
+            disputeNote: '入住照片里墙面是干净的',
+          ),
+        ),
+      );
+    });
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(
+          theme: ZTheme.light(),
+          home: const DepositPage(propertyId: 'p1'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    // 部分扣除时明细里能看到被扣 3000
+    expect(find.textContaining('¥3,000'), findsWidgets);
+    expect(find.text('维权备注'), findsOneWidget, reason: '维权期间明细里会显示');
+
+    // 房东后来把扣的钱也退了 → 改成「已退还」（选中 + 确认）
+    await tester.tap(find.widgetWithText(ChoiceChip, '已退还'));
+    await tester.pumpAndSettle();
+    await tester.runAsync(() async {
+      await tester.tap(find.text('确认更新'));
+      await tester.pump();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await tester.pump();
+    });
+    await tester.pumpAndSettle();
+
+    final saved = repository.propertyById('p1')!.deposit;
+    expect(saved.status, DepositStatus.returned);
+    expect(saved.returnedAmount, 8000, reason: '全额退到手');
+    expect(saved.deductedAmount, 0, reason: '已退还就没有被扣除的金额了');
+    expect(saved.deductReason, isEmpty);
+    expect(saved.disputeNote, isEmpty, reason: '已退还后维权备注也从明细里清掉');
+    // 明细里不再出现扣款金额，过程仍留在状态变更记录里
+    expect(find.textContaining('¥3,000'), findsNothing);
+    expect(find.textContaining('墙面有污渍'), findsNothing);
+    expect(
+      find.text('维权备注'),
+      findsNothing,
+      reason: '金额明细里不再有这一行',
+    );
+    expect(
+      find.textContaining('原维权备注：入住照片里墙面是干净的'),
+      findsOneWidget,
+      reason: '原内容写进状态变更记录，信息不丢',
+    );
+    expect(
+      find.text('手动更新状态'),
+      findsNothing,
+      reason: '状态变更记录里不写这句泛化文案',
+    );
+  });
+
   testWidgets('押金追踪：选部分扣除要填扣款信息，保存后页面立刻更新', (tester) async {
     tester.view.physicalSize = const Size(390, 1400);
     tester.view.devicePixelRatio = 1;
@@ -6935,12 +7259,14 @@ void groupWidgets() {
     expect(find.text('墙面有污渍'), findsWidgets);
     expect(find.text('入住照片里墙面是干净的'), findsWidgets);
 
-    // 部分扣除之后：只能往「已退还」走，待退还 / 已缴纳都不能点
-    ChoiceChip chipOf(String label) =>
-        tester.widget<ChoiceChip>(find.widgetWithText(ChoiceChip, label));
-    expect(chipOf('已缴纳').onSelected, isNull);
-    expect(chipOf('待退还').onSelected, isNull);
-    expect(chipOf('已退还').onSelected, isNotNull);
+    // 部分扣除之后：只能往「已退还」走，待退还 / 已缴纳直接不显示
+    expect(
+      find.widgetWithText(ChoiceChip, '已缴纳'),
+      findsNothing,
+      reason: '不能点的状态不再摆出来',
+    );
+    expect(find.widgetWithText(ChoiceChip, '待退还'), findsNothing);
+    expect(find.widgetWithText(ChoiceChip, '已退还'), findsOneWidget);
   });
 
   testWidgets('首页与租住：房子都退租时摆押金摘要，点一下切到费用页', (tester) async {

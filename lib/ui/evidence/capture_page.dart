@@ -331,7 +331,11 @@ class _CapturePageState extends State<CapturePage> {
           for (final tool in tools) ...[
             InkWell(
               borderRadius: BorderRadius.circular(100),
-              onTap: () => setState(() => _tool = tool.$1),
+              onTap: () {
+                // 选工具时收起键盘：问题描述输入完，直接在照片上画
+                FocusManager.instance.primaryFocus?.unfocus();
+                setState(() => _tool = tool.$1);
+              },
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
                 decoration: BoxDecoration(
@@ -533,6 +537,8 @@ class _CapturePageState extends State<CapturePage> {
   );
 
   void _onStart(Offset local, Size size) {
+    // 手指落下去画的时候，先把问题描述键盘收起来，避免键盘挡住照片
+    FocusManager.instance.primaryFocus?.unfocus();
     if (_tool == 'text') return;
     setState(() {
       _draft = AnnotationShape(
@@ -568,6 +574,7 @@ class _CapturePageState extends State<CapturePage> {
   }
 
   Future<void> _onTap(Offset local, Size size) async {
+    FocusManager.instance.primaryFocus?.unfocus();
     if (_tool != 'text') return;
     // 同一类坑：弹窗还没退场就 dispose 控制器会让 TextField 重建时红屏，
     // 这里只用局部变量收一下输入

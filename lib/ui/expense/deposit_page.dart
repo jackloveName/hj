@@ -52,6 +52,10 @@ class DepositPage extends StatelessWidget {
     bool blocked(DepositStatus status) =>
         !canSwitchDeposit(deposit.status, status) ||
         (status == DepositStatus.partiallyDeducted && !canDeduct);
+    /// 「更新押金状态」里实际能选的目标（不能点的直接不显示）
+    final statusOptions = _depositStates
+        .where((status) => !blocked(status))
+        .toList();
 
     return ZScreen(
       child: Column(
@@ -139,17 +143,19 @@ class DepositPage extends StatelessWidget {
                       ),
                     ),
                   ),
-                if (!minimal) const ZSectionTitle(
-                  title: '更新押金状态',
-                  icon: Icons.sync_alt,
-                ),
-                if (!minimal)
+                // 只摆真的能选的目标：点不动的（回头路 / 已到头 / 没金额时的
+                // 部分扣除）直接不显示，别摆一排灰按钮让人点
+                if (!minimal && statusOptions.isNotEmpty) ...[
+                  const ZSectionTitle(
+                    title: '更新押金状态',
+                    icon: Icons.sync_alt,
+                  ),
                   _StatusPicker(
-                    current: deposit.status,
-                    canPick: (status) => !blocked(status),
+                    options: statusOptions,
                     onConfirm: (status) =>
                         _update(context, repository, property, status),
                   ),
+                ],
                 if (!minimal && deposit.status == DepositStatus.returned)
                   const Padding(
                     padding: EdgeInsets.only(top: 10),
@@ -163,8 +169,7 @@ class DepositPage extends StatelessWidget {
                   const Padding(
                     padding: EdgeInsets.only(top: 10),
                     child: ZHintBar(
-                      text: '这套房已经退租：押金状态只能继续往后走'
-                          '（待退还 / 部分扣除 / 已退还），不能回头改回去。',
+                      text: '这套房已经退租：押金状态只能继续往后走，不能回头改回去。',
                       icon: Icons.lock_outline_rounded,
                     ),
                   )
@@ -219,16 +224,26 @@ class DepositPage extends StatelessWidget {
                         valueColor: deposit.deductedAmount > 0
                             ? Z.dangerDeep
                             : Z.ink3,
+                        // 已退还下面不再摆「扣除理由 / 维权备注」，底线收掉
+                        divider:
+                            deposit.deductReason.isNotEmpty ||
+                            deposit.status != DepositStatus.returned,
                       ),
                       if (deposit.deductReason.isNotEmpty)
-                        ZKv(label: '扣除理由', value: deposit.deductReason),
-                      ZKv(
-                        label: '维权备注',
-                        value: deposit.disputeNote.isEmpty
-                            ? '未填写'
-                            : deposit.disputeNote,
-                        divider: false,
-                      ),
+                        ZKv(
+                          label: '扣除理由',
+                          value: deposit.deductReason,
+                          divider: deposit.status != DepositStatus.returned,
+                        ),
+                      // 已退还：维权备注从明细里收起来（原内容记在状态变更记录里）
+                      if (deposit.status != DepositStatus.returned)
+                        ZKv(
+                          label: '维权备注',
+                          value: deposit.disputeNote.isEmpty
+                              ? '未填写'
+                              : deposit.disputeNote,
+                          divider: false,
+                        ),
                     ],
                   ),
                 ),
@@ -349,15 +364,33 @@ class DepositPage extends StatelessWidget {
       await _applyPartialDeduction(context, repository, property);
       return;
     }
+    final now = DateTime.now();
+    final clearingNote = status == DepositStatus.returned;
+    // 已退还时要把维权备注从金额明细里清掉 —— 原内容写进这次的状态变更记录，
+    // 过程别丢。普通的「改状态」不写泛化文案（状态本身已经显示了）。
+    final oldNote = deposit.disputeNote.trim();
     final logs = [
       ...deposit.logs,
-      DepositLog(status: status, time: DateTime.now(), note: '手动更新状态'),
+      DepositLog(
+        status: status,
+        time: now,
+        note: clearingNote && oldNote.isNotEmpty
+            ? '已全额退还 · 原维权备注：$oldNote'
+            : '',
+      ),
     ];
     var updated = deposit.copyWith(status: status, logs: logs);
     if (status == DepositStatus.returned) {
       updated = updated.copyWith(
         returnedAmount: property.contract.deposit,
-        returnedDate: DateTime.now(),
+        returnedDate: now,
+        // 全额退到手 = 没有扣款：把之前「部分扣除」记的金额与理由清掉
+        // （历史日志里那条「部分扣除」仍然留着，是过程记录）
+        deductedAmount: 0,
+        deductReason: '',
+        // 维权备注也只在维权期间有意义：退到手就从明细里收起来
+        // （原内容见上面那条日志）
+        disputeNote: '',
       );
     }
     await repository.updateProperty(
@@ -676,16 +709,12 @@ class _NoDepositPromptState extends State<_NoDepositPrompt> {
 /// 仍然保持置灰（[canPick] 由页面按同一套规则算好）。
 class _StatusPicker extends StatefulWidget {
   const _StatusPicker({
-    required this.current,
-    required this.canPick,
+    required this.options,
     required this.onConfirm,
   });
 
-  /// 当前押金状态（chips 里会标「当前」）
-  final DepositStatus current;
-
-  /// 这个目标能不能选（只能往前走；金额没填时「部分扣除」不能选）
-  final bool Function(DepositStatus status) canPick;
+  /// 能选的目标（页面已按「只能往前走」筛过：点不动的不传进来）
+  final List<DepositStatus> options;
 
   /// 用户确认后真正落库（「部分扣除」在这里会弹填金额的弹层）
   final Future<void> Function(DepositStatus status) onConfirm;
@@ -717,22 +746,14 @@ class _StatusPickerState extends State<_StatusPicker> {
           spacing: 8,
           runSpacing: 8,
           children: [
-            for (final status in _depositStates)
+            for (final status in widget.options)
               ChoiceChip(
-                label: Text(
-                  status == widget.current
-                      ? '${status.label} · 当前'
-                      : status.label,
+                label: Text(status.label),
+                // 点一下只是选中（还没落库），再按确认才生效
+                selected: status == pending,
+                onSelected: (_) => setState(
+                  () => _pending = status == pending ? null : status,
                 ),
-                // 当前状态始终高亮；点了哪个目标也先亮起来，但还没落库
-                selected: status == widget.current || status == pending,
-                // 打勾的只有「刚选中的目标」：当前状态靠「· 当前」区分
-                showCheckmark: status == pending,
-                onSelected: widget.canPick(status)
-                    ? (_) => setState(
-                        () => _pending = status == pending ? null : status,
-                      )
-                    : null,
               ),
           ],
         ),

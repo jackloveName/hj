@@ -48,6 +48,9 @@ class PropertyDetailPage extends StatelessWidget {
             photos: repository.photosOf(property.id),
           )
         : null;
+    // 顶部头图：设定封面就用封面；没设但拍过取证照片，就用照片兜底 ——
+    // 只有一张照片都没有时才用内置默认图
+    final headerCoverRef = _headerCoverRef(repository, property);
 
     return ZScreen(
       // 已退租 = 只剩查看：底部不给任何操作；纠纷中只留维权与退租
@@ -58,7 +61,11 @@ class PropertyDetailPage extends StatelessWidget {
           : null,
       child: Column(
         children: [
-          _Header(property: property, editable: canEditProperty(property)),
+          _Header(
+            property: property,
+            coverRef: headerCoverRef,
+            editable: canEditProperty(property),
+          ),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
@@ -196,6 +203,19 @@ class PropertyDetailPage extends StatelessWidget {
     );
   }
 
+  /// 顶部头图用哪张：**设了封面就用封面**；没设但拍过取证照片，就用照片兜底
+  /// （优先入住取证，和「设封面」的默认口径一致；否则用最新那张）。
+  /// 一张照片都没有时才返回 null，交给内置默认底图。
+  String? _headerCoverRef(Repository repository, Property property) {
+    final cover = property.coverRef;
+    if (cover != null && cover.isNotEmpty) return cover;
+    final photos = repository.photosOf(property.id);
+    if (photos.isEmpty) return null;
+    final moveIn = photos.where((photo) => photo.phase == PhotoPhase.moveIn);
+    final pick = moveIn.isNotEmpty ? moveIn.first : photos.first;
+    return pick.thumbRef.isNotEmpty ? pick.thumbRef : pick.imageRef;
+  }
+
   /// 删除整套房子（含照片与全部记录）。
   ///
   /// 这是不可恢复的操作，二次确认里要把「会删掉什么」和「更好的做法」都写清楚：
@@ -211,7 +231,7 @@ class PropertyDetailPage extends StatelessWidget {
       title: '删除「${property.name}」？',
       message:
           '会连同这套房的 $photos 张照片、合同与全部记录一起删掉，删了拿不回来。\n\n'
-          '只是想结束租约的话，用「退租」；要拿去维权的话，先导出对比报告或照片包。',
+          '只是想结束租约的话，用「退租」；要拿去维权的话，先导出对比报告。',
       confirmText: '删除',
       cancelText: '再想想',
       danger: true,
@@ -521,18 +541,27 @@ class _TenancyRecapCard extends StatelessWidget {
     if (latest == null) return;
     final deposit = latest.deposit;
     final now = DateTime.now();
+    final oldNote = deposit.disputeNote.trim();
     await repository.updateProperty(
       latest.copyWith(
         deposit: deposit.copyWith(
           status: DepositStatus.returned,
           returnedAmount: total,
           returnedDate: now,
+          // 全额退到手就不该再挂扣款（历史日志留着，别把过程抹掉）
+          deductedAmount: 0,
+          deductReason: '',
+          // 维权备注只在维权期间有意义：退到手就从明细收起来，
+          // 原内容写进下面这条日志
+          disputeNote: '',
           logs: [
             ...deposit.logs,
             DepositLog(
               status: DepositStatus.returned,
               time: now,
-              note: '押金 ${fmtMoney(total)} 已退还',
+              note:
+                  '押金 ${fmtMoney(total)} 已退还'
+                  '${oldNote.isEmpty ? '' : ' · 原维权备注：$oldNote'}',
             ),
           ],
         ),
@@ -604,9 +633,14 @@ const TextStyle _labelStyle = TextStyle(
 );
 
 class _Header extends StatelessWidget {
-  const _Header({required this.property, required this.editable});
+  const _Header({
+    required this.property,
+    required this.coverRef,
+    required this.editable,
+  });
 
   final Property property;
+  final String? coverRef;
 
   /// 非租住中（已退租 / 纠纷中）不给「编辑房源」入口：历史只能看
   final bool editable;
@@ -619,7 +653,7 @@ class _Header extends StatelessWidget {
       // +20 是余量：320 宽时底部三枚胶囊会换成两行，加上 1.2 倍字号需要的高度
       height: MediaQuery.textScalerOf(context).scale(168) + 20,
       child: ZPhoto(
-        ref: property.coverRef,
+        ref: coverRef,
         radius: 0,
         // 没传封面、或封面文件已经丢了（换机只导了 JSON 之类的），
         // 就退回内置底图 —— 头图位置写「文件缺失」太扎眼，也不像首页该有的样子

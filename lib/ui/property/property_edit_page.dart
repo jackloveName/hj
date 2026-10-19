@@ -823,6 +823,8 @@ class _PropertyEditPageState extends State<PropertyEditPage> {
   Future<void> _pickRentDueDay(BuildContext context) async {
     final picked = await showModalBottomSheet<int>(
       context: context,
+      // 28 个日期在小屏上会超过默认的半个屏幕高度：放开高度上限并允许滚动
+      isScrollControlled: true,
       backgroundColor: Z.card,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(Z.rXl)),
@@ -830,30 +832,32 @@ class _PropertyEditPageState extends State<PropertyEditPage> {
       builder: (ctx) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('每月几号交租', style: ZText.title4),
-              const SizedBox(height: 4),
-              Text(
-                '点一个日期就选中；只到 28 号（有的月份没有 29–31 号）。',
-                style: ZText.caption,
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (var day = 1; day <= 28; day++)
-                    ChoiceChip(
-                      label: Text('$day'),
-                      selected: _rentDueDay == day,
-                      onSelected: (_) => Navigator.of(ctx).pop(day),
-                    ),
-                ],
-              ),
-            ],
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('每月几号交租', style: ZText.title4),
+                const SizedBox(height: 4),
+                Text(
+                  '点一个日期就选中；只到 28 号（有的月份没有 29–31 号）。',
+                  style: ZText.caption,
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (var day = 1; day <= 28; day++)
+                      ChoiceChip(
+                        label: Text('$day'),
+                        selected: _rentDueDay == day,
+                        onSelected: (_) => Navigator.of(ctx).pop(day),
+                      ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -896,12 +900,24 @@ class _DateButton extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Text(
-              fmtDate(value),
-              style: ZText.mono.copyWith(fontSize: 13, color: Z.ink),
+            // 小屏 + 大字时日期会把格子撑破：让它缩到宽度内，别裁掉
+            Expanded(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  fmtDate(value),
+                  maxLines: 1,
+                  style: ZText.mono.copyWith(fontSize: 13, color: Z.ink),
+                ),
+              ),
             ),
-            const Spacer(),
-            Icon(Icons.calendar_today_outlined, size: 15, color: Z.ink4),
+            const SizedBox(width: 4),
+            Icon(
+              Icons.calendar_today_outlined,
+              size: 15,
+              color: Z.ink4,
+            ),
           ],
         ),
       ),
