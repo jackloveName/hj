@@ -8037,6 +8037,18 @@ void groupWidgets() {
     await tester.pump(const Duration(milliseconds: 200));
     expect(tester.takeException(), isNull);
     expect(find.textContaining('1/3'), findsOneWidget);
+    expect(
+      tester
+          .widget<ZPhoto>(
+            find.descendant(
+              of: find.byType(PageView),
+              matching: find.byType(ZPhoto),
+            ),
+          )
+          .fit,
+      BoxFit.contain,
+      reason: '单图模式要完整显示照片，不能裁掉边缘',
+    );
 
     await tester.drag(find.byType(PageView), const Offset(-400, 0));
     await tester.pump();

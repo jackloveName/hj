@@ -106,12 +106,23 @@ class _RoomAlbumPageState extends State<RoomAlbumPage> {
                                   context,
                                   PhotoDetailPage(photoId: photo.id),
                                 ),
-                                child: ZPhoto(
-                                  ref: photo.imageRef,
-                                  watermark: [
-                                    '${photo.issueType.emoji} ${photo.issueType.label}',
-                                    fmtDateTime(photo.timestamp),
-                                  ],
+                                // 单图看的是整张证据：按原图比例摆，
+                                // contain 完整显示，不用 cover 裁掉边缘
+                                child: Center(
+                                  child: AspectRatio(
+                                    aspectRatio:
+                                        photo.width > 0 && photo.height > 0
+                                        ? photo.width / photo.height
+                                        : 4 / 3,
+                                    child: ZPhoto(
+                                      ref: photo.imageRef,
+                                      fit: BoxFit.contain,
+                                      watermark: [
+                                        '${photo.issueType.emoji} ${photo.issueType.label}',
+                                        fmtDateTime(photo.timestamp),
+                                      ],
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
