@@ -588,13 +588,8 @@ class Repository extends ChangeNotifier {
 
   Future<EvidencePhoto> addPhoto(EvidencePhoto photo) async {
     _photos.add(photo);
-    final property = propertyById(photo.propertyId);
-    if (property != null &&
-        (property.coverRef == null || property.coverRef!.isEmpty) &&
-        photo.phase == PhotoPhase.moveIn) {
-      final index = _properties.indexWhere((p) => p.id == property.id);
-      _properties[index] = property.copyWith(coverRef: photo.thumbRef);
-    }
+    // 封面只由用户手动设置：拍取证照片不自动把它变成房源封面，
+    // 否则「设了封面没变、没设也变」会让人分不清封面到底有没有设。
     _mediaBytes = await _media.usedBytes();
     await _persist();
     return photo;
@@ -634,23 +629,12 @@ class Repository extends ChangeNotifier {
     await _deletePhotoFiles(photo);
     _photos.removeWhere((p) => p.id == id);
 
-    // 删掉的正好是房源封面时，顺延到另一张入住照片，避免封面指向已删除文件
+    // 删掉的正好是房源封面时清掉封面，回到内置底图；
+    // 不自动拿另一张没被选过的照片顶上
     final property = propertyById(photo.propertyId);
     if (property != null && property.coverRef == photo.thumbRef) {
-      final fallback =
-          _photos
-              .where(
-                (p) =>
-                    p.propertyId == photo.propertyId &&
-                    p.phase == PhotoPhase.moveIn,
-              )
-              .toList()
-            ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
       final index = _properties.indexWhere((p) => p.id == property.id);
-      _properties[index] = property.copyWith(
-        coverRef: fallback.isEmpty ? null : fallback.first.thumbRef,
-        clearCover: fallback.isEmpty,
-      );
+      _properties[index] = property.copyWith(clearCover: true);
     }
     _mediaBytes = await _media.usedBytes();
     await _persist();

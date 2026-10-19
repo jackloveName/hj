@@ -48,10 +48,6 @@ class PropertyDetailPage extends StatelessWidget {
             photos: repository.photosOf(property.id),
           )
         : null;
-    // 顶部头图：设定封面就用封面；没设但拍过取证照片，就用照片兜底 ——
-    // 只有一张照片都没有时才用内置默认图
-    final headerCoverRef = _headerCoverRef(repository, property);
-
     return ZScreen(
       // 已退租 = 只剩查看：底部不给任何操作；纠纷中只留维权与退租
       bottomBar: canEditProperty(property)
@@ -63,7 +59,8 @@ class PropertyDetailPage extends StatelessWidget {
         children: [
           _Header(
             property: property,
-            coverRef: headerCoverRef,
+            // 头图只听「房源封面」：没设封面时即使有取证照片也用默认图
+            coverRef: property.coverRef,
             editable: canEditProperty(property),
           ),
           Expanded(
@@ -201,19 +198,6 @@ class PropertyDetailPage extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  /// 顶部头图用哪张：**设了封面就用封面**；没设但拍过取证照片，就用照片兜底
-  /// （优先入住取证，和「设封面」的默认口径一致；否则用最新那张）。
-  /// 一张照片都没有时才返回 null，交给内置默认底图。
-  String? _headerCoverRef(Repository repository, Property property) {
-    final cover = property.coverRef;
-    if (cover != null && cover.isNotEmpty) return cover;
-    final photos = repository.photosOf(property.id);
-    if (photos.isEmpty) return null;
-    final moveIn = photos.where((photo) => photo.phase == PhotoPhase.moveIn);
-    final pick = moveIn.isNotEmpty ? moveIn.first : photos.first;
-    return pick.thumbRef.isNotEmpty ? pick.thumbRef : pick.imageRef;
   }
 
   /// 删除整套房子（含照片与全部记录）。

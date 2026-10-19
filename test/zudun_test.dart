@@ -7052,7 +7052,7 @@ void groupWidgets() {
     expect(saved.first.text, '墙面裂缝 12cm');
   });
 
-  testWidgets('房源详情：没设封面但有取证照片时，头图用照片', (tester) async {
+  testWidgets('房源详情：头图只听封面，没设封面用默认图', (tester) async {
     tester.view.physicalSize = const Size(390, 1400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -7085,11 +7085,16 @@ void groupWidgets() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
 
-    // 头图（页面第一张 ZPhoto）用的是照片，而不是内置默认图
+    // 没设封面：即使有取证照片，头图也保持默认图
     expect(
       tester.widget<ZPhoto>(find.byType(ZPhoto).first).ref,
-      'media:p1/ph1.thumb.jpg',
-      reason: '没设封面时用取证照片兜底',
+      isNull,
+      reason: '没设封面时头图不拿取证照片兜底',
+    );
+    expect(
+      tester.widget<ZPhoto>(find.byType(ZPhoto).first).fallback,
+      isA<ZDefaultCover>(),
+      reason: '没设封面时用内置默认图',
     );
 
     // 设了封面就听封面的
