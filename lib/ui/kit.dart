@@ -13,6 +13,39 @@ Color statusPillColor(PropertyStatus status) => switch (status) {
 };
 
 /// 页面外框：统一底色、内容宽度与安全区。
+/// 数字键盘没有回车键（iOS 的数字键盘尤其明显）：键盘升起时在底栏上方
+/// 补一条「完成」，点一下收起键盘 —— 否则用户没有别的方式关掉它。
+class ZKeyboardDoneBar extends StatelessWidget {
+  const ZKeyboardDoneBar({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 42,
+      decoration: BoxDecoration(
+        color: Z.page,
+        border: Border(top: BorderSide(color: Z.line)),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Row(
+        children: [
+          const Spacer(),
+          TextButton.icon(
+            onPressed: () => FocusManager.instance.primaryFocus?.unfocus(),
+            style: TextButton.styleFrom(
+              minimumSize: const Size(0, 32),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            icon: const Icon(Icons.keyboard_hide_outlined, size: 16),
+            label: const Text('完成'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class ZScreen extends StatelessWidget {
   const ZScreen({
     super.key,
@@ -42,6 +75,10 @@ class ZScreen extends StatelessWidget {
           child: Column(
             children: [
               Expanded(child: child),
+              // 键盘升起时（数字键盘没有回车键）多一条「完成」，
+              // 点它收起键盘，底部按钮才露得出来
+              if (MediaQuery.viewInsetsOf(context).bottom > 0)
+                const ZKeyboardDoneBar(),
               ?bottomBar,
             ],
           ),

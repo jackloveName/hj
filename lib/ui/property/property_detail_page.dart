@@ -613,8 +613,11 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 高度跟着系统字体放大走：写死 168 时，320 宽的小屏 + 1.2 倍字
+    // 会把底部的状态胶囊挤出画面
     return SizedBox(
-      height: 168,
+      // +20 是余量：320 宽时底部三枚胶囊会换成两行，加上 1.2 倍字号需要的高度
+      height: MediaQuery.textScalerOf(context).scale(168) + 20,
       child: ZPhoto(
         ref: property.coverRef,
         radius: 0,
@@ -804,13 +807,18 @@ class _ModuleGrid extends StatelessWidget {
       ),
     ];
 
-    return GridView.count(
-      crossAxisCount: 3,
+    // 格子高度按「内容需要多少」给（106），不再用宽高比：
+    // 320pt 小屏上宽高比算出来的格子比内容还矮，大字号下直接溢出
+    return GridView(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: 9,
-      crossAxisSpacing: 9,
-      childAspectRatio: 1.06,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        mainAxisSpacing: 9,
+        crossAxisSpacing: 9,
+        // 112 = 内容在 1.2 倍字号下需要的高度 + 一点取整余量
+        mainAxisExtent: 112,
+      ),
       children: [for (final module in modules) _ModuleTile(module: module)],
     );
   }

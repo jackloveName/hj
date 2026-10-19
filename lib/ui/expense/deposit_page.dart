@@ -143,27 +143,13 @@ class DepositPage extends StatelessWidget {
                   title: '更新押金状态',
                   icon: Icons.sync_alt,
                 ),
-                if (!minimal) Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final status in _depositStates)
-                      ChoiceChip(
-                        label: Text(status.label),
-                        selected: deposit.status == status,
-                        // 已退租的房子不摆回头路：点「已缴纳」也没用
-                        // （纠纷中的房子还能改这四种状态，改完房源状态一动不动）
-                        onSelected: blocked(status)
-                            ? null
-                            : (_) => _update(
-                                context,
-                                repository,
-                                property,
-                                status,
-                              ),
-                      ),
-                  ],
-                ),
+                if (!minimal)
+                  _StatusPicker(
+                    current: deposit.status,
+                    canPick: (status) => !blocked(status),
+                    onConfirm: (status) =>
+                        _update(context, repository, property, status),
+                  ),
                 if (!minimal && deposit.status == DepositStatus.returned)
                   const Padding(
                     padding: EdgeInsets.only(top: 10),
@@ -678,6 +664,147 @@ class _NoDepositPromptState extends State<_NoDepositPrompt> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// 「更新押金状态」：点 chip 只是**选中**，确认行把后果说清楚，再点「确认更新」才落库。
+///
+/// 押金状态只能往前走，而且「已退还」是终点 —— 一次误触就没法回头。
+/// 所以做成两段式：先选目标，看清后果，再确认。已退租 / 金额没填时点不动的 chip
+/// 仍然保持置灰（[canPick] 由页面按同一套规则算好）。
+class _StatusPicker extends StatefulWidget {
+  const _StatusPicker({
+    required this.current,
+    required this.canPick,
+    required this.onConfirm,
+  });
+
+  /// 当前押金状态（chips 里会标「当前」）
+  final DepositStatus current;
+
+  /// 这个目标能不能选（只能往前走；金额没填时「部分扣除」不能选）
+  final bool Function(DepositStatus status) canPick;
+
+  /// 用户确认后真正落库（「部分扣除」在这里会弹填金额的弹层）
+  final Future<void> Function(DepositStatus status) onConfirm;
+
+  @override
+  State<_StatusPicker> createState() => _StatusPickerState();
+}
+
+class _StatusPickerState extends State<_StatusPicker> {
+  DepositStatus? _pending;
+
+  /// 选中的目标会带来什么：不同状态说不同的话，别只说「已更新」
+  String _effectOf(DepositStatus status) => switch (status) {
+    DepositStatus.toBeReturned => '押金还在房东手里：之后还能继续改成「部分扣除 / 已退还」。',
+    DepositStatus.partiallyDeducted => '会先让你填「扣了多少 / 为什么扣」，记完只剩「已退还」可改。',
+    DepositStatus.returned => '押金流程走完，之后不能再改。确认钱真的到账了。',
+    DepositStatus.paid => '押金记成已缴纳，之后可以继续往下走。',
+    DepositStatus.none => '这套房按「不需要押金」记。',
+    DepositStatus.inDispute => '押金转入纠纷中。',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final pending = _pending;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final status in _depositStates)
+              ChoiceChip(
+                label: Text(
+                  status == widget.current
+                      ? '${status.label} · 当前'
+                      : status.label,
+                ),
+                // 当前状态始终高亮；点了哪个目标也先亮起来，但还没落库
+                selected: status == widget.current || status == pending,
+                // 打勾的只有「刚选中的目标」：当前状态靠「· 当前」区分
+                showCheckmark: status == pending,
+                onSelected: widget.canPick(status)
+                    ? (_) => setState(
+                        () => _pending = status == pending ? null : status,
+                      )
+                    : null,
+              ),
+          ],
+        ),
+        if (pending != null) ...[
+          const SizedBox(height: 10),
+          _PendingConfirm(
+            text: '将改成「${pending.label}」——${_effectOf(pending)}',
+            danger: pending == DepositStatus.returned,
+            onCancel: () => setState(() => _pending = null),
+            onConfirm: () async {
+              final target = pending;
+              await widget.onConfirm(target);
+              if (!mounted) return;
+              setState(() => _pending = null);
+            },
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// 选中目标后的确认条：写清后果 + 取消 / 确认更新
+class _PendingConfirm extends StatelessWidget {
+  const _PendingConfirm({
+    required this.text,
+    required this.danger,
+    required this.onCancel,
+    required this.onConfirm,
+  });
+
+  final String text;
+  final bool danger;
+  final VoidCallback onCancel;
+  final VoidCallback onConfirm;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = danger ? Z.danger : Z.brand;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 8, 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.22)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            text,
+            style: ZText.caption.copyWith(height: 1.5),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: onCancel,
+                child: Text('取消', style: TextStyle(color: Z.ink3)),
+              ),
+              const SizedBox(width: 6),
+              FilledButton(
+                style: danger
+                    ? FilledButton.styleFrom(backgroundColor: Z.danger)
+                    : null,
+                onPressed: onConfirm,
+                child: const Text('确认更新'),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

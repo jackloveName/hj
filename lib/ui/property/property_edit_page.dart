@@ -396,28 +396,33 @@ class _PropertyEditPageState extends State<PropertyEditPage> {
     ),
     ZField(
       label: '每月交租日',
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: BoxDecoration(
-          color: Z.card,
-          borderRadius: Z.radiusField,
-          border: Border.all(color: Z.line),
-        ),
-        child: DropdownButtonHideUnderline(
-          child: DropdownButton<int>(
-            value: _rentDueDay,
-            isExpanded: true,
-            items: [
-              for (var day = 1; day <= 28; day++)
-                DropdownMenuItem(value: day, child: Text('$day 号')),
+      // 以前是 DropdownButton：1–28 号一展开菜单就占满半屏。
+      // 改成点开一个紧凑的数字格子弹层，点哪个就是哪一天。
+      child: InkWell(
+        borderRadius: Z.radiusField,
+        onTap: () => _pickRentDueDay(context),
+        child: Container(
+          height: 46,
+          padding: const EdgeInsets.symmetric(horizontal: 13),
+          decoration: BoxDecoration(
+            color: Z.card,
+            borderRadius: Z.radiusField,
+            border: Border.all(color: Z.line),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '每月 $_rentDueDay 号',
+                  style: ZText.body.copyWith(fontSize: 14),
+                ),
+              ),
+              Icon(
+                Icons.keyboard_arrow_down_rounded,
+                size: 18,
+                color: Z.ink3,
+              ),
             ],
-            onChanged: (value) {
-              if (value == null) return;
-              setState(() {
-                _rentDueDay = value;
-                _rentDueDayEdited = true;
-              });
-            },
           ),
         ),
       ),
@@ -764,7 +769,9 @@ class _PropertyEditPageState extends State<PropertyEditPage> {
           ),
         );
         if (!mounted) return;
-        Navigator.of(context).pop();
+        // 注意顺序：先问「要不要现在取证」，再决定离开向导页 ——
+        // 以前是先 pop 再弹框，等用户点「立即取证」时这页已经卸载，
+        // context.mounted 变成 false，于是什么都不发生
         final start = await zConfirm(
           context,
           title: '房源已创建',
@@ -772,10 +779,16 @@ class _PropertyEditPageState extends State<PropertyEditPage> {
           confirmText: '立即取证',
           cancelText: '稍后',
         );
-        if (!context.mounted) return;
+        if (!mounted) return;
         if (start) {
-          if (!mounted) return;
-          await zPush(context, EvidenceRoomsPage(propertyId: created.id));
+          // 用 replace：从取证页返回时直接回到列表，别再回到已经保存过的向导
+          await Navigator.of(context).pushReplacement(
+            MaterialPageRoute<void>(
+              builder: (_) => EvidenceRoomsPage(propertyId: created.id),
+            ),
+          );
+        } else {
+          Navigator.of(context).pop();
         }
       } else {
         // 以仓库里最新那份为底：向导打开之后，押金状态 / 房源状态 / 表底数
@@ -801,6 +814,55 @@ class _PropertyEditPageState extends State<PropertyEditPage> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// 选「每月几号交租」：1–28 号排成一片数字，点一个就选中。
+  ///
+  /// 以前用 DropdownButton，28 项一展开菜单就占满半屏；这里换成紧凑的弹层。
+  /// 只到 28 号：29–31 号在有的月份不存在，交租日统一取 28 号以内。
+  Future<void> _pickRentDueDay(BuildContext context) async {
+    final picked = await showModalBottomSheet<int>(
+      context: context,
+      backgroundColor: Z.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(Z.rXl)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('每月几号交租', style: ZText.title4),
+              const SizedBox(height: 4),
+              Text(
+                '点一个日期就选中；只到 28 号（有的月份没有 29–31 号）。',
+                style: ZText.caption,
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (var day = 1; day <= 28; day++)
+                    ChoiceChip(
+                      label: Text('$day'),
+                      selected: _rentDueDay == day,
+                      onSelected: (_) => Navigator.of(ctx).pop(day),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _rentDueDay = picked;
+      _rentDueDayEdited = true;
+    });
   }
 }
 

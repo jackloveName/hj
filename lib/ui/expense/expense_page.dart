@@ -909,20 +909,24 @@ class _SummaryCard extends StatelessWidget {
                 color: Z.onDarkMuted,
               ),
               const SizedBox(width: 5),
-              Text(
-                // 不需要押金的房子别念「押金 ¥0 · 无押金」，一句话说清
-                property.deposit.status == DepositStatus.none
-                    ? '这套房不需要押金'
-                    : '押金 ${fmtMoney(property.contract.deposit)}'
-                          ' · ${property.deposit.status.label}',
-                style: const TextStyle(
-                  fontFamily: Z.font,
-                  fontFamilyFallback: Z.fallback,
-                  fontSize: 11,
-                  color: Z.onDarkMuted,
+              // 用 Expanded 兜住：这一行在 320 宽 + 大字号时以前会顶出卡片
+              Expanded(
+                child: Text(
+                  // 不需要押金的房子别念「押金 ¥0 · 无押金」，一句话说清
+                  property.deposit.status == DepositStatus.none
+                      ? '这套房不需要押金'
+                      : '押金 ${fmtMoney(property.contract.deposit)}'
+                            ' · ${property.deposit.status.label}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontFamily: Z.font,
+                    fontFamilyFallback: Z.fallback,
+                    fontSize: 11,
+                    color: Z.onDarkMuted,
+                  ),
                 ),
               ),
-              const Spacer(),
               const Icon(
                 Icons.chevron_right_rounded,
                 size: 16,
@@ -931,9 +935,11 @@ class _SummaryCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
+          // 用 Wrap：小屏 + 大字号时金额换到下一行，而不是把整行顶出卡片
+          Wrap(
+            spacing: 8,
+            runSpacing: 2,
+            crossAxisAlignment: WrapCrossAlignment.end,
             children: [
               Text(
                 '已缴 $paidMonths 个月',
@@ -947,7 +953,6 @@ class _SummaryCard extends StatelessWidget {
                   color: Colors.white,
                 ),
               ),
-              const SizedBox(width: 8),
               Text(
                 fmtMoney(paidTotal),
                 style: const TextStyle(

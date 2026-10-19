@@ -4973,6 +4973,97 @@ void groupWidgets() {
     );
   });
 
+  testWidgets('添加房源：点「立即取证」要真的进到入住取证页', (tester) async {
+    tester.view.physicalSize = const Size(430, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(
+          theme: ZTheme.light(),
+          home: const PropertyEditPage(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 第 1 步：名称 + 地址
+    await tester.enterText(find.byType(TextField).first, '望京 SOHO 公寓 A 座 1802');
+    await tester.enterText(find.byType(TextField).at(1), '北京市朝阳区望京街 10 号院');
+    await tester.tap(find.text('下一步'));
+    await tester.pumpAndSettle();
+    // 第 2 步：房东
+    await tester.enterText(find.byType(TextField).first, '张建国');
+    await tester.tap(find.text('下一步'));
+    await tester.pumpAndSettle();
+    // 第 3 步：月租 / 押金
+    await tester.enterText(find.byType(TextField).at(0), '6800');
+    await tester.enterText(find.byType(TextField).at(1), '13600');
+    await tester.tap(find.text('下一步'));
+    await tester.pumpAndSettle();
+
+    await tester.runAsync(() async {
+      await tester.tap(find.text('保存并生成提醒计划'));
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      await tester.pump();
+    });
+    await tester.pumpAndSettle();
+
+    // 创建完问「要不要现在取证」
+    expect(find.text('房源已创建'), findsOneWidget);
+    await tester.runAsync(() async {
+      await tester.tap(find.text('立即取证'));
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      await tester.pump();
+    });
+    await tester.pumpAndSettle();
+
+    // 以前这里什么都不发生（页面先被 pop 掉了）
+    expect(find.text('入住取证'), findsWidgets, reason: '要进到入住取证页');
+  });
+
+  testWidgets('每月交租日：点开是紧凑的数字格，不是占满屏的下拉菜单', (tester) async {
+    tester.view.physicalSize = const Size(430, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(
+          theme: ZTheme.light(),
+          home: const PropertyEditPage(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).first, '望京 SOHO 公寓 A 座 1802');
+    await tester.enterText(find.byType(TextField).at(1), '北京市朝阳区望京街 10 号院');
+    await tester.tap(find.text('下一步'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, '张建国');
+    await tester.tap(find.text('下一步'));
+    await tester.pumpAndSettle();
+
+    // 点开「每月 N 号」
+    await tester.tap(find.textContaining('每月 ').first);
+    await tester.pumpAndSettle();
+    expect(find.text('每月几号交租'), findsOneWidget);
+    expect(
+      find.byType(DropdownButton<int>),
+      findsNothing,
+      reason: '不再用 28 项的下拉菜单',
+    );
+    await tester.tap(find.widgetWithText(ChoiceChip, '15'));
+    await tester.pumpAndSettle();
+    expect(find.text('每月 15 号'), findsOneWidget);
+  });
+
   testWidgets('添加房源：点下一步后不该还有输入框保持高亮', (tester) async {
     tester.view.physicalSize = const Size(390, 900);
     tester.view.devicePixelRatio = 1;
@@ -5976,6 +6067,100 @@ void groupWidgets() {
     expect(months.last, monthKey(DateTime(2027, 3, 1)));
   });
 
+  testWidgets('数字键盘：升起时多一条「完成」可以收起', (tester) async {
+    tester.view.physicalSize = const Size(390, 900);
+    tester.view.devicePixelRatio = 1;
+    // 模拟键盘顶起 320
+    tester.view.viewInsets = const FakeViewPadding(bottom: 320);
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      final base = buildProperty();
+      await repository.addProperty(
+        base.copyWith(
+          contract: base.contract.copyWith(deposit: 0),
+          deposit: base.deposit.copyWith(status: DepositStatus.none),
+        ),
+      );
+    });
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<Repository>.value(
+        value: repository,
+        child: MaterialApp(
+          theme: ZTheme.light(),
+          home: const DepositPage(propertyId: 'p1'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    // 键盘升起 → 「完成」在底栏上方
+    expect(find.text('完成'), findsOneWidget);
+
+    // 点输入框聚焦，再点「完成」收起
+    await tester.tap(find.byType(TextField).first);
+    await tester.pumpAndSettle();
+    final editable = tester.widget<EditableText>(find.byType(EditableText));
+    expect(editable.focusNode.hasFocus, isTrue);
+
+    await tester.tap(find.text('完成'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<EditableText>(find.byType(EditableText)).focusNode.hasFocus,
+      isFalse,
+      reason: '点「完成」要能收起键盘',
+    );
+  });
+
+  testWidgets('小屏 + 大字：房源详情与费用页不能溢出', (tester) async {
+    // 用 App 启动时那套真实字体（测试默认字体是方块字宽，跟真机不一样）。
+    // 字体加载要真实事件循环，所以裹在 runAsync 里（否则这一条会卡住）
+    await tester.runAsync(() async {
+      for (final entry in <String, String>{
+        'Outfit': 'assets/fonts/Outfit-400.ttf',
+        'NotoSansSC': 'assets/fonts/NotoSansSC-Regular.ttf',
+        'JetBrainsMono': 'assets/fonts/JB-Mono-400.ttf',
+      }.entries) {
+        final loader = FontLoader(entry.key)
+          ..addFont(
+            Future.value(
+              File(entry.value).readAsBytesSync().buffer.asByteData(),
+            ),
+          );
+        await loader.load();
+      }
+    });
+    // 真机上的两个变量：320pt 小屏（iPhone SE 一代）和系统字体放大（App 限到 1.2）
+    tester.view.physicalSize = const Size(320, 1400);
+    tester.view.devicePixelRatio = 1;
+    tester.platformDispatcher.textScaleFactorTestValue = 1.2;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    await tester.runAsync(() async {
+      await repository.addProperty(buildProperty());
+    });
+
+    for (final page in <String, Widget>{
+      '房源详情': const PropertyDetailPage(propertyId: 'p1'),
+      '费用页': const Scaffold(body: ExpensePage()),
+    }.entries) {
+      await tester.pumpWidget(
+        ChangeNotifierProvider<Repository>.value(
+          value: repository,
+          child: MaterialApp(theme: ZTheme.light(), home: page.value),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final error = tester.takeException();
+      expect(error, isNull, reason: '${page.key} 在小屏 + 大字下溢出：$error');
+    }
+  });
+
   testWidgets('首页：押金金额没填也得说「还没退到手」，不能念结清', (tester) async {
     tester.view.physicalSize = const Size(390, 1400);
     tester.view.devicePixelRatio = 1;
@@ -6164,8 +6349,15 @@ void groupWidgets() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
 
-    ChoiceChip chipOf(String label) =>
-        tester.widget<ChoiceChip>(find.widgetWithText(ChoiceChip, label));
+    // 当前状态那颗 chip 的文案是「已退还 · 当前」，所以按前缀找
+    ChoiceChip chipOf(String label) => tester.widget<ChoiceChip>(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is ChoiceChip &&
+            widget.label is Text &&
+            ((widget.label as Text).data ?? '').startsWith(label),
+      ),
+    );
     expect(
       chipOf('部分扣除').onSelected,
       isNull,
@@ -6294,8 +6486,15 @@ void groupWidgets() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
 
-    ChoiceChip chipOf(String label) =>
-        tester.widget<ChoiceChip>(find.widgetWithText(ChoiceChip, label));
+    // 当前状态那颗 chip 的文案是「待退还 · 当前」/「已退还 · 当前」，按前缀找
+    ChoiceChip chipOf(String label) => tester.widget<ChoiceChip>(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is ChoiceChip &&
+            widget.label is Text &&
+            ((widget.label as Text).data ?? '').startsWith(label),
+      ),
+    );
     expect(
       chipOf('已缴纳').onSelected,
       isNull,
@@ -6314,9 +6513,17 @@ void groupWidgets() {
     );
     expect(find.textContaining('只能继续往后走'), findsOneWidget);
 
-    // 真的点「已退还」也照常生效：押金能继续往前流转
+    // 点「已退还」只是选中：确认行把后果写出来，再点「确认更新」才落库
+    await tester.tap(find.widgetWithText(ChoiceChip, '已退还'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('押金流程走完'), findsOneWidget);
+    expect(
+      repository.propertyById('p2')!.deposit.status,
+      DepositStatus.toBeReturned,
+      reason: '只是选中，还没落库',
+    );
     await tester.runAsync(() async {
-      await tester.tap(find.widgetWithText(ChoiceChip, '已退还'));
+      await tester.tap(find.text('确认更新'));
       await tester.pump();
       await Future<void>.delayed(const Duration(milliseconds: 50));
       await tester.pump();
@@ -6405,8 +6612,16 @@ void groupWidgets() {
       reason: '页面要写清为什么改不了',
     );
 
+    // 先选中、再确认（两段式，避免误触直接落库）
+    await tester.tap(find.widgetWithText(ChoiceChip, '已退还'));
+    await tester.pumpAndSettle();
+    expect(
+      repository.propertyById('p1')!.deposit.status,
+      DepositStatus.inDispute,
+      reason: '只是选中，还没落库',
+    );
     await tester.runAsync(() async {
-      await tester.tap(find.widgetWithText(ChoiceChip, '已退还'));
+      await tester.tap(find.text('确认更新'));
       await tester.pump();
       await Future<void>.delayed(const Duration(milliseconds: 50));
       await tester.pump();
@@ -6503,9 +6718,11 @@ void groupWidgets() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
 
-    // 只在押金页把状态改成「待退还」：没走退租流程，房源就不该变
+    // 只在押金页把状态改成「待退还」：先选中，再确认
+    await tester.tap(find.widgetWithText(ChoiceChip, '待退还'));
+    await tester.pumpAndSettle();
     await tester.runAsync(() async {
-      await tester.tap(find.widgetWithText(ChoiceChip, '待退还'));
+      await tester.tap(find.text('确认更新'));
       await Future<void>.delayed(const Duration(milliseconds: 50));
       await tester.pump();
     });
@@ -6663,8 +6880,16 @@ void groupWidgets() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
 
-    // 点「部分扣除」→ 弹层只问三件事：扣了多少、为什么扣、维权备注
+    // 点「部分扣除」只是选中，确认后才弹填写层：
+    // 扣了多少、为什么扣、维权备注
     await tester.tap(find.widgetWithText(ChoiceChip, '部分扣除'));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('会先让你填「扣了多少'),
+      findsOneWidget,
+      reason: '选中后先说清接下来要填什么',
+    );
+    await tester.tap(find.text('确认更新'));
     await tester.pumpAndSettle();
     expect(find.text('押金部分扣除'), findsOneWidget);
     expect(find.text('扣除多少钱'), findsOneWidget);
