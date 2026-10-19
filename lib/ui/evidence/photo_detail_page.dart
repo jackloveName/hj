@@ -445,7 +445,7 @@ class _AnnotateSheetState extends State<_AnnotateSheet> {
       _draft = AnnotationShape(
         type: _tool,
         points: [_norm(local, size)],
-        colorValue: 0xFF2F6BFF,
+        colorValue: Z.cameraAnnotate.toARGB32(),
       );
     });
   }
@@ -485,7 +485,7 @@ class _AnnotateSheetState extends State<_AnnotateSheet> {
           type: 'text',
           points: [point],
           text: text,
-          colorValue: 0xFF2F6BFF,
+          colorValue: Z.cameraAnnotate.toARGB32(),
         ),
       );
     });

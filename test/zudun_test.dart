@@ -7050,6 +7050,11 @@ void groupWidgets() {
     expect(saved, hasLength(1));
     expect(saved.first.type, 'text');
     expect(saved.first.text, '墙面裂缝 12cm');
+    expect(
+      saved.first.colorValue,
+      Z.cameraAnnotate.toARGB32(),
+      reason: '追加标注统一用红色笔',
+    );
   });
 
   testWidgets('房源详情：头图只听封面，没设封面用默认图', (tester) async {
