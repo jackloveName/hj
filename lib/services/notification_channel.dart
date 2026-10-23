@@ -372,8 +372,7 @@ class LocalNotificationChannel implements NotificationChannel {
       if (web == null) return '当前浏览器不支持系统通知';
       return switch (web.permissionStatus) {
         WebNotificationPermission.granted => null,
-        WebNotificationPermission.denied =>
-          '浏览器已拒绝通知：点地址栏左侧的站点设置，把「通知」改成允许',
+        WebNotificationPermission.denied => '浏览器已拒绝通知：点地址栏左侧的站点设置，把「通知」改成允许',
         _ => '浏览器还没允许通知：先打开上面的开关授权',
       };
     }

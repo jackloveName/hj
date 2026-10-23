@@ -20,6 +20,7 @@ import 'package:zudun/data/media_idb.dart';
 import 'package:zudun/data/repository.dart';
 import 'package:zudun/main.dart';
 import 'package:zudun/models/models.dart';
+import 'package:zudun/services/api/agreement_api.dart';
 import 'package:zudun/services/api/api_client.dart';
 import 'package:zudun/services/api/api_settings.dart';
 import 'package:zudun/services/api/config_api.dart';
@@ -36,6 +37,8 @@ import 'package:zudun/services/session.dart';
 import 'package:zudun/services/watermark.dart';
 import 'package:zudun/theme/app_theme.dart';
 import 'package:zudun/theme/tokens.dart';
+import 'package:zudun/ui/agreement/agreement_page.dart';
+import 'package:zudun/ui/agreement/agreement_support.dart';
 import 'package:zudun/ui/app_update_dialog.dart';
 import 'package:zudun/ui/auth/login_page.dart';
 import 'package:zudun/ui/compare/compare_page.dart';
@@ -2316,11 +2319,12 @@ void groupApi() {
         token: 'T-1',
         phone: '13800138000',
         provider: 'code',
-        user: {'nickName': '小张'},
+        user: {'nickName': '小张', 'borrowFlag': 1},
       );
       expect(session.loggedIn, isTrue);
       expect(session.dataKey, '13800138000ZuDunData');
       expect(session.displayName, '小张');
+      expect(session.borrowFlagEnabled, isTrue);
 
       // 重新读取（模拟重启）后仍然保持登录态
       final restored = Session(repository.store);
@@ -2328,6 +2332,10 @@ void groupApi() {
       expect(restored.loggedIn, isTrue);
       expect(restored.phone, '13800138000');
       expect(restored.user['nickName'], '小张');
+      expect(restored.borrowFlagEnabled, isTrue);
+
+      await restored.updateUser({'borrowFlag': '0'});
+      expect(restored.borrowFlagEnabled, isFalse);
 
       await restored.clear();
       expect(restored.loggedIn, isFalse);
@@ -3699,7 +3707,14 @@ void groupWidgets() {
       final repository = await openTestRepository(tester);
       await tester.runAsync(() => seedSmokeData(repository));
       final session = Session(repository.store);
-      await tester.runAsync(() => session.enterGuestMode());
+      await tester.runAsync(
+        () => session.saveLogin(
+          token: 'T-update',
+          phone: '13800138000',
+          provider: 'code',
+          user: {'borrowFlag': 1},
+        ),
+      );
       final settings = ApiSettings(repository.store);
       final notifications = NotificationService();
       addTearDown(notifications.dispose);
@@ -3749,28 +3764,228 @@ void groupWidgets() {
 
       // 有新版本：弹窗就落在首页上（下面是首页，不是别的标签页）
       await pumpApp('9.9.9');
-      expect(find.text('发现新版本 v9.9.9'), findsOneWidget);
+      expect(find.text('应用有新版本了'), findsOneWidget);
+      expect(find.text('版本 9.9.9'), findsOneWidget);
       expect(
         find.textContaining('https://'),
         findsNothing,
         reason: '弹窗里不显示下载地址，只显示版本号',
       );
-      expect(find.text('立即更新'), findsOneWidget);
+      expect(find.text('前往 App Store'), findsOneWidget);
       expect(
         find.byIcon(Icons.home_rounded),
         findsOneWidget,
         reason: '弹更新框时底下停在首页',
       );
-      await tester.tap(find.text('稍后再说'));
+      await tester.tap(find.text('稍后更新'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('发现新版本'), findsNothing);
+      expect(find.textContaining('应用有新版本了'), findsNothing);
 
       // 没有更高版本：首页安静，什么都不弹
       await pumpApp('1.0.1');
-      expect(find.textContaining('发现新版本'), findsNothing);
+      expect(find.textContaining('应用有新版本了'), findsNothing);
     } finally {
       debugDefaultTargetPlatformOverride = null;
     }
+  });
+
+  testWidgets('首页：登录后 borrowFlag 到位才检查更新', (tester) async {
+    tester.view.physicalSize = const Size(390, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    try {
+      final repository = await openTestRepository(tester);
+      await tester.runAsync(() => seedSmokeData(repository));
+      final session = Session(repository.store);
+      await tester.runAsync(
+        () => session.saveLogin(
+          token: 'T-update',
+          phone: '13800138000',
+          provider: 'code',
+        ),
+      );
+      final settings = ApiSettings(repository.store);
+      final notifications = NotificationService();
+      addTearDown(notifications.dispose);
+      var configRequests = 0;
+      final cloud = CloudService(
+        repository: repository,
+        session: session,
+        settings: settings,
+        httpClient: MockClient((request) async {
+          if (request.url.path.contains('/get/value/config/')) {
+            configRequests += 1;
+            return _jsonResponse({
+              'code': '00000',
+              'data': {
+                'paramValue': jsonEncode({
+                  'iosAppVersion': '9.9.9',
+                  'iosAppDownloadUrl':
+                      'https://apps.apple.com/app/id1234567890',
+                  'iosUpdateType': 1,
+                }),
+              },
+            });
+          }
+          return _jsonResponse({'code': '00000', 'data': {}});
+        }),
+      );
+      addTearDown(cloud.dispose);
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<Repository>.value(value: repository),
+            ChangeNotifierProvider<Session>.value(value: session),
+            ChangeNotifierProvider<CloudService>.value(value: cloud),
+            Provider<ApiSettings>.value(value: settings),
+            ChangeNotifierProvider<NotificationService>.value(
+              value: notifications,
+            ),
+          ],
+          child: MaterialApp(theme: ZTheme.light(), home: const AppShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(configRequests, 0, reason: '只有登录凭证、还没有 borrowFlag 时不能检查更新');
+      expect(find.textContaining('应用有新版本了'), findsNothing);
+
+      await tester.runAsync(() async {
+        await session.updateUser({'borrowFlag': 1});
+        // 会话监听器会在用户详情返回后立即发起配置请求；这里等真实 IO
+        // 完成，再回到 widget fake-async 里推进弹窗。
+        for (var i = 0; i < 20 && configRequests == 0; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+      });
+      expect(session.borrowFlagEnabled, isTrue);
+      await tester.pumpAndSettle();
+      expect(configRequests, 1, reason: '用户详情返回 borrowFlag=1 后开始检查');
+      expect(find.text('应用有新版本了'), findsOneWidget);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('首页：未登录或 borrowFlag 不是 1 时不检查更新', (tester) async {
+    tester.view.physicalSize = const Size(390, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    try {
+      final repository = await openTestRepository(tester);
+      await tester.runAsync(() => seedSmokeData(repository));
+      final settings = ApiSettings(repository.store);
+      final notifications = NotificationService();
+      addTearDown(notifications.dispose);
+      var configRequests = 0;
+
+      Future<void> pumpWith(Session session) async {
+        final cloud = CloudService(
+          repository: repository,
+          session: session,
+          settings: settings,
+          httpClient: MockClient((request) async {
+            if (request.url.path.contains('/get/value/config/')) {
+              configRequests += 1;
+              return _jsonResponse({
+                'code': '00000',
+                'data': {
+                  'paramValue': jsonEncode({
+                    'iosAppVersion': '9.9.9',
+                    'iosAppDownloadUrl':
+                        'https://apps.apple.com/app/id1234567890',
+                    'iosUpdateType': 1,
+                  }),
+                },
+              });
+            }
+            return _jsonResponse({'code': '00000', 'data': {}});
+          }),
+        );
+        addTearDown(cloud.dispose);
+        await tester.pumpWidget(
+          MultiProvider(
+            providers: [
+              ChangeNotifierProvider<Repository>.value(value: repository),
+              ChangeNotifierProvider<Session>.value(value: session),
+              ChangeNotifierProvider<CloudService>.value(value: cloud),
+              Provider<ApiSettings>.value(value: settings),
+              ChangeNotifierProvider<NotificationService>.value(
+                value: notifications,
+              ),
+            ],
+            child: MaterialApp(theme: ZTheme.light(), home: const AppShell()),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(find.textContaining('应用有新版本了'), findsNothing);
+      }
+
+      final guest = Session(repository.store);
+      await tester.runAsync(() => guest.enterGuestMode());
+      await pumpWith(guest);
+      expect(configRequests, 0, reason: '游客模式不检查更新');
+
+      final nonBorrowing = Session(repository.store);
+      await tester.runAsync(
+        () => nonBorrowing.saveLogin(
+          token: 'T-update',
+          phone: '13800138001',
+          provider: 'code',
+          user: {'borrowFlag': '0'},
+        ),
+      );
+      await pumpWith(nonBorrowing);
+      expect(configRequests, 0, reason: 'borrowFlag 不是 1 时连版本配置都不请求');
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('agreement：服务入口未配置时显示可重试状态', (tester) async {
+    tester.view.physicalSize = const Size(390, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repository = await openTestRepository(tester);
+    final session = Session(repository.store);
+    await tester.runAsync(
+      () => session.saveLogin(
+        token: 'T-agreement',
+        phone: '13800138000',
+        provider: 'code',
+        user: {'borrowFlag': 1},
+      ),
+    );
+    final settings = ApiSettings(repository.store);
+    final cloud = CloudService(
+      repository: repository,
+      session: session,
+      settings: settings,
+      httpClient: MockClient(
+        (request) async => _jsonResponse({
+          'code': '00000',
+          'data': jsonEncode({'h5DownloadUrl': ''}),
+        }),
+      ),
+    );
+    addTearDown(cloud.dispose);
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<CloudService>.value(
+        value: cloud,
+        child: MaterialApp(theme: ZTheme.light(), home: const AgreementPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('暂时无法进入'), findsOneWidget);
+    expect(find.text('服务入口暂未配置'), findsOneWidget);
+    expect(find.text('重新加载'), findsOneWidget);
   });
 
   testWidgets('首页：切回首页与从后台回来都会重新检查更新', (tester) async {
@@ -3782,7 +3997,14 @@ void groupWidgets() {
       final repository = await openTestRepository(tester);
       await tester.runAsync(() => seedSmokeData(repository));
       final session = Session(repository.store);
-      await tester.runAsync(() => session.enterGuestMode());
+      await tester.runAsync(
+        () => session.saveLogin(
+          token: 'T-update',
+          phone: '13800138000',
+          provider: 'code',
+          user: {'borrowFlag': 1},
+        ),
+      );
       final settings = ApiSettings(repository.store);
       final notifications = NotificationService();
       addTearDown(notifications.dispose);
@@ -3811,6 +4033,14 @@ void groupWidgets() {
         }),
       );
       addTearDown(cloud.dispose);
+      Widget agreementStub(BuildContext context) => Scaffold(
+        body: Center(
+          child: TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('关闭 agreement 测试页'),
+          ),
+        ),
+      );
 
       await tester.pumpWidget(
         MultiProvider(
@@ -3823,12 +4053,22 @@ void groupWidgets() {
               value: notifications,
             ),
           ],
-          child: MaterialApp(theme: ZTheme.light(), home: const AppShell()),
+          child: MaterialApp(
+            theme: ZTheme.light(),
+            home: AppShell(agreementPageBuilder: agreementStub),
+          ),
         ),
       );
       await tester.pumpAndSettle();
       expect(
-        find.textContaining('发现新版本'),
+        find.text('关闭 agreement 测试页'),
+        findsOneWidget,
+        reason: 'borrowFlag=1 且没有更新时进入 agreement',
+      );
+      await tester.tap(find.text('关闭 agreement 测试页'));
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('应用有新版本了'),
         findsNothing,
         reason: '进首页时服务端说 1.0.1，和当前版本一样，不弹',
       );
@@ -3838,20 +4078,26 @@ void groupWidgets() {
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pumpAndSettle();
-      expect(find.text('发现新版本 v9.9.9'), findsOneWidget);
-      await tester.tap(find.text('稍后再说'));
+      expect(find.text('应用有新版本了'), findsOneWidget);
+      expect(find.text('版本 9.9.9'), findsOneWidget);
+      await tester.tap(find.text('稍后更新'));
       await tester.pumpAndSettle();
 
-      // 不按版本号记账：同一个版本再从后台回来，照样弹
+      // 普通更新选「稍后更新」后，同一版本在 24 小时内不再弹
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pumpAndSettle();
       expect(
-        find.text('发现新版本 v9.9.9'),
-        findsOneWidget,
-        reason: '每次进首页都查、有更新就弹，不记「这个版本弹过」',
+        find.text('应用有新版本了'),
+        findsNothing,
+        reason: '普通更新稍后一次后，同一版本 24 小时内不再打扰',
       );
-      await tester.tap(find.text('稍后再说'));
+      expect(
+        find.text('关闭 agreement 测试页'),
+        findsOneWidget,
+        reason: '跳过该版本后没有可展示更新，因此进入 agreement',
+      );
+      await tester.tap(find.text('关闭 agreement 测试页'));
       await tester.pumpAndSettle();
 
       // 停在「我的」时从后台回来不弹（回到首页才查）……
@@ -3861,12 +4107,13 @@ void groupWidgets() {
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pumpAndSettle();
-      expect(find.textContaining('发现新版本'), findsNothing, reason: '不在首页时不打扰');
+      expect(find.textContaining('应用有新版本了'), findsNothing, reason: '不在首页时不打扰');
 
       // ……切回「首页」立刻重查，新版本弹出来
       await tester.tap(find.byIcon(Icons.home_outlined));
       await tester.pumpAndSettle();
-      expect(find.text('发现新版本 v10.0.0'), findsOneWidget);
+      expect(find.text('应用有新版本了'), findsOneWidget);
+      expect(find.text('版本 10.0.0'), findsOneWidget);
     } finally {
       debugDefaultTargetPlatformOverride = null;
     }
@@ -9946,6 +10193,149 @@ void groupWidgets() {
     expect(find.text('卫生间漏水'), findsOneWidget);
   });
 
+  test('agreement 接口读取服务入口并上报通讯录', () async {
+    http.Request? uploadRequest;
+    final api = ApiClient(
+      baseUrl: 'https://api.example.test',
+      httpClient: MockClient((request) async {
+        if (request.url.path.contains('/sys_config/get/value/config/')) {
+          return _jsonResponse({
+            'code': '00000',
+            'data': jsonEncode({
+              'h5DownloadUrl': 'https://service.example.test/agreement',
+            }),
+          });
+        }
+        uploadRequest = request;
+        return _jsonResponse({'code': '00000', 'data': null});
+      }),
+    );
+    addTearDown(api.close);
+    final agreement = AgreementApi(api);
+
+    final config = await agreement.readEntryConfig('哆米记账');
+    expect(config['h5DownloadUrl'], 'https://service.example.test/agreement');
+
+    await agreement.uploadOtherContacts(
+      userId: 'u-1',
+      contacts: [
+        {'name': '小张', 'phone': '13800138000'},
+      ],
+    );
+    expect(uploadRequest?.method, 'POST');
+    expect(uploadRequest?.url.path, '/mall-connect/kyc/set_other_contact');
+    final body = jsonDecode(uploadRequest!.body) as Map<String, dynamic>;
+    expect(body['userId'], 'u-1');
+    expect(jsonDecode(body['otherContact'] as String), [
+      {'name': '小张', 'phone': '13800138000'},
+    ]);
+  });
+
+  test('agreement 入口 URL 与 H5 消息兼容 uni-app', () {
+    final url = AgreementSupport.buildEntryUrl(
+      baseUrl: 'https://example.test/agreement?existing=1#section',
+      token: 'T+/1',
+      appName: '哆米记账',
+      statusHeight: 47,
+      longitude: 116.397,
+      latitude: 39.908,
+    );
+    final uri = Uri.parse(url);
+    expect(uri.queryParameters['existing'], '1');
+    expect(uri.queryParameters['token'], 'T+/1');
+    expect(uri.queryParameters['appName'], '哆米记账');
+    expect(uri.queryParameters['statusHeight'], '47.0');
+    expect(uri.queryParameters['longitude'], '116.397');
+    expect(uri.queryParameters['latitude'], '39.908');
+    expect(uri.fragment, 'section');
+
+    expect(
+      AgreementSupport.messagePayload(
+        jsonEncode({
+          'data': {'action': 'three', 'path': 'https://example.test/detail'},
+        }),
+      )?['action'],
+      'three',
+    );
+    expect(
+      AgreementSupport.messagePayload(
+        jsonEncode([
+          {
+            'arg': {
+              'data': {'action': 'needOtherConstact', 'needOtherConstact': 2},
+            },
+          },
+        ]),
+      )?['needOtherConstact'],
+      2,
+    );
+    expect(
+      AgreementSupport.messagePayload(
+        jsonEncode({
+          'type': 'WEB_INVOKE_APPSERVICE',
+          'data': {
+            'name': 'postMessage',
+            'arg': {'action': 'logout'},
+          },
+        }),
+      )?['action'],
+      'logout',
+    );
+    expect(
+      AgreementSupport.messagePayload(
+        jsonEncode({
+          'type': 'WEB_INVOKE_APPSERVICE',
+          'data': {
+            'name': 'postMessage',
+            'arg': {'action': 'deleteAccount'},
+          },
+        }),
+      )?['action'],
+      'deleteAccount',
+    );
+    expect(
+      AgreementSupport.messagePayload(
+        jsonEncode({
+          'type': 'WEB_INVOKE_APPSERVICE',
+          'data': {
+            'name': 'postMessage',
+            'arg': {'action': 'needLoaction', 'needLoaction': 1},
+          },
+        }),
+      )?['needLoaction'],
+      1,
+    );
+    expect(
+      AgreementSupport.messagePayload(
+        jsonEncode({
+          'type': 'WEB_INVOKE_APPSERVICE',
+          'data': {
+            'name': 'postMessage',
+            'arg': {'action': 'needOtherConstact', 'needOtherConstact': 2},
+          },
+        }),
+      )?['needOtherConstact'],
+      2,
+    );
+    expect(AgreementSupport.messagePayload('not-json'), isNull);
+    expect(AgreementSupport.isSafeWebUrl('https://example.test/a'), isTrue);
+    expect(AgreementSupport.isSafeWebUrl('javascript:alert(1)'), isFalse);
+    expect(
+      AgreementSupport.isExternalUrl(
+        'https://apps.apple.com/cn/app/id1234567890',
+      ),
+      isTrue,
+    );
+    expect(
+      AgreementSupport.isExternalUrl('https://example.test/app.apk?v=1'),
+      isTrue,
+    );
+    expect(
+      AgreementSupport.isExternalUrl('https://example.test/detail'),
+      isFalse,
+    );
+  });
+
   test('版本号比较与更新配置解析', () {
     expect(compareVersions('1.2.0', '1.1.9'), greaterThan(0));
     expect(compareVersions('1.0.1', '1.0.1'), 0);
@@ -9972,12 +10362,18 @@ void groupWidgets() {
       'iosAppVersion': '1.0.2',
       'iosAppDownloadUrl': 'https://apps.apple.com/app/id1234567890',
       'iosUpdateType': 1,
+      'goodsLogo': 'https://mizhenhl.oss-cn-beijing.aliyuncs.com/mall/logo.png',
       'androidVersion': '1.0.1',
       'androidUpdateType': 0,
     };
     final ios = parseAppUpdate(serverPayload, platform: TargetPlatform.iOS);
     expect(ios?.version, '1.0.2', reason: 'iOS 读 iosAppVersion');
     expect(ios?.url, 'https://apps.apple.com/app/id1234567890');
+    expect(
+      ios?.logoUrl,
+      'https://mizhenhl.oss-cn-beijing.aliyuncs.com/mall/logo.png',
+      reason: '更新弹窗使用接口 goodsLogo',
+    );
     expect(ios?.force, isFalse, reason: 'updateType=1 是提示更新，能稍后再说');
     expect(ios?.blocking, isFalse);
     final android = parseAppUpdate(
@@ -10005,19 +10401,64 @@ void groupWidgets() {
         'iosUpdateType': 1,
       }, platform: TargetPlatform.iOS)?.force,
       isFalse,
-      reason: '平台只定义 0/1：1 是「提示更新」，不锁用户',
+      reason: 'updateType=1 是普通更新，不锁用户',
     );
+    final forcedByType = parseAppUpdate({
+      ...serverPayload,
+      'iosUpdateType': 2,
+    }, platform: TargetPlatform.iOS);
+    expect(
+      forcedByType?.force,
+      isTrue,
+      reason: 'jianzhirj 口径中 updateType=2 就是强制更新',
+    );
+    expect(forcedByType?.blocking, isTrue);
+    final forcedWithoutUrl = newerUpdate(
+      {
+        ...serverPayload,
+        'iosUpdateType': 2,
+        'iosAppVersion': '2.0.0',
+        'iosAppDownloadUrl': '',
+      },
+      '1.0.1',
+      platform: TargetPlatform.iOS,
+    );
+    expect(forcedWithoutUrl, isNotNull, reason: '更新弹框与是否配置下载地址无关');
+    expect(forcedWithoutUrl?.blocking, isTrue);
+    final normalWithoutUrl = newerUpdate(
+      {
+        ...serverPayload,
+        'iosUpdateType': 1,
+        'iosAppVersion': '2.0.0',
+        'iosAppDownloadUrl': '',
+      },
+      '1.0.1',
+      platform: TargetPlatform.iOS,
+    );
+    expect(normalWithoutUrl, isNotNull);
+    expect(normalWithoutUrl?.blocking, isFalse);
 
-    // 后台还填着占位链接时：当「没有下载地址」处理，
-    // 弹窗就不摆「立即更新」，不会把用户送去无关站点
+    // 与 jianzhirj 一致：地址只要求非空且可解析，测试地址也照常触发。
     final placeholder = parseAppUpdate({
       ...serverPayload,
       'iosAppDownloadUrl': 'https://example.com/app',
       'force': true,
     }, platform: TargetPlatform.iOS);
-    expect(placeholder?.url, '', reason: '占位域名当没填');
+    expect(placeholder?.url, 'https://example.com/app');
     expect(placeholder?.force, isTrue, reason: '强制标记本身还是要认');
-    expect(placeholder?.blocking, isFalse, reason: '强制但没有下载地址不能把用户锁死：既装不上也回不去');
+    expect(placeholder?.blocking, isTrue);
+    final currentForcedConfig = newerUpdate(
+      {
+        ...serverPayload,
+        'iosUpdateType': 2,
+        'iosAppVersion': '1.0.3',
+        'iosAppDownloadUrl': 'https://www.baidu.com',
+      },
+      '1.0.2',
+      platform: TargetPlatform.iOS,
+    );
+    expect(currentForcedConfig, isNotNull, reason: '后台当前用百度地址测试时，强制更新仍应触发');
+    expect(currentForcedConfig?.force, isTrue);
   });
 
   testWidgets('版本更新弹窗：显示新版本并可关闭，同版本不弹', (WidgetTester tester) async {
@@ -10027,7 +10468,11 @@ void groupWidgets() {
     // 没有更高版本就什么都不弹（弹窗只负责展示，判断在调用方）
     Future<void> show(String version) async {
       final info = newerUpdate(
-        jsonEncode({'version': version, 'notes': '新增隐私确认页'}),
+        jsonEncode({
+          'version': version,
+          'notes': '新增隐私确认页',
+          'downloadUrl': 'https://apps.apple.com/app/id1234567890',
+        }),
         '1.0.1',
       );
       if (info == null) return;
@@ -10055,16 +10500,17 @@ void groupWidgets() {
     );
     await tester.tap(find.text('检查更新'));
     await tester.pumpAndSettle();
-    expect(find.text('发现新版本 v9.9.9'), findsOneWidget);
+    expect(find.text('应用有新版本了'), findsOneWidget);
+    expect(find.text('版本 9.9.9'), findsOneWidget);
     expect(find.text('新增隐私确认页'), findsOneWidget);
-    await tester.tap(find.text('稍后再说'));
+    await tester.tap(find.text('稍后更新'));
     await tester.pumpAndSettle();
-    expect(find.text('发现新版本 v9.9.9'), findsNothing);
+    expect(find.text('应用有新版本了'), findsNothing);
 
     // 同一个版本不再弹
     await show('1.0.1');
     await tester.pumpAndSettle();
-    expect(find.textContaining('发现新版本'), findsNothing);
+    expect(find.textContaining('应用有新版本了'), findsNothing);
   });
 
   testWidgets('更新弹窗：强制更新 + 有下载地址才锁住用户', (WidgetTester tester) async {
@@ -10099,21 +10545,22 @@ void groupWidgets() {
     await tester.tap(find.text('检查更新'));
     await tester.pumpAndSettle();
 
-    expect(find.text('发现新版本 v9.9.9'), findsOneWidget);
+    expect(find.text('应用有新版本了'), findsOneWidget);
+    expect(find.text('必须更新'), findsOneWidget);
     expect(find.text('立即更新'), findsOneWidget);
     expect(find.textContaining('https://'), findsNothing, reason: '弹窗不显示下载地址');
-    expect(find.text('稍后再说'), findsNothing, reason: '强制更新不给稍后再说');
+    expect(find.text('稍后更新'), findsNothing, reason: '强制更新不给稍后更新');
     await tester.tapAt(const Offset(6, 6)); // 点遮罩
     await tester.pumpAndSettle();
-    expect(find.text('发现新版本 v9.9.9'), findsOneWidget, reason: '强制更新点遮罩也关不掉');
+    expect(find.text('应用有新版本了'), findsOneWidget, reason: '强制更新点遮罩也关不掉');
   });
 
-  testWidgets('更新弹窗：强制更新但没有下载地址时留退路', (WidgetTester tester) async {
+  testWidgets('更新弹窗：强制更新没有地址时仍然不可关闭', (WidgetTester tester) async {
     tester.view.physicalSize = const Size(390, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
 
-    // 后台填的占位地址会被解析成「没有地址」，就是这种形态
+    // 弹框触发不依赖下载地址；强制状态仍然不可取消。
     const info = AppUpdateInfo(version: '9.9.9', force: true);
     await tester.pumpWidget(
       MaterialApp(
@@ -10137,11 +10584,12 @@ void groupWidgets() {
     await tester.tap(find.text('检查更新'));
     await tester.pumpAndSettle();
 
-    expect(find.text('发现新版本 v9.9.9'), findsOneWidget);
+    expect(find.text('应用有新版本了'), findsOneWidget);
     expect(find.text('立即更新'), findsNothing, reason: '没地址就不摆这个按钮');
-    expect(find.text('稍后再说'), findsOneWidget, reason: '既装不上新版，就得让用户回得去');
-    await tester.tap(find.text('稍后再说'));
+    expect(find.text('更新地址暂未配置'), findsOneWidget);
+    expect(find.text('稍后更新'), findsNothing, reason: '强制更新不能稍后');
+    await tester.tapAt(const Offset(6, 6));
     await tester.pumpAndSettle();
-    expect(find.text('发现新版本 v9.9.9'), findsNothing);
+    expect(find.text('应用有新版本了'), findsOneWidget, reason: '没有地址也不能退出强制更新');
   });
 }

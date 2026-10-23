@@ -13,16 +13,14 @@ String encryptPassword(
   final plain = utf8.encode(
     '${timestampMs ?? DateTime.now().millisecondsSinceEpoch}$password',
   );
-  final cipher = PaddedBlockCipherImpl(
-    PKCS7Padding(),
-    ECBBlockCipher(AESEngine()),
-  )..init(
-    true,
-    PaddedBlockCipherParameters<KeyParameter, Null>(
-      KeyParameter(Uint8List.fromList(utf8.encode(secret))),
-      null,
-    ),
-  );
+  final cipher =
+      PaddedBlockCipherImpl(PKCS7Padding(), ECBBlockCipher(AESEngine()))..init(
+        true,
+        PaddedBlockCipherParameters<KeyParameter, Null>(
+          KeyParameter(Uint8List.fromList(utf8.encode(secret))),
+          null,
+        ),
+      );
   final encrypted = cipher.process(Uint8List.fromList(plain));
   return base64.encode(encrypted);
 }

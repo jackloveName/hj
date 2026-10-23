@@ -149,11 +149,7 @@ class NotificationService extends ChangeNotifier {
     if (blocked != null) return blocked;
     final id = notificationId('test|${DateTime.now().millisecondsSinceEpoch}');
     try {
-      await _show(
-        id: id,
-        title: '租盾提醒已开启',
-        body: '到交租、合同到期、抄表的日子，我会在这里提醒你。',
-      );
+      await _show(id: id, title: '租盾提醒已开启', body: '到交租、合同到期、抄表的日子，我会在这里提醒你。');
     } catch (error) {
       _lastError = '$error';
       notifyListeners();
@@ -272,7 +268,8 @@ class NotificationService extends ChangeNotifier {
     _queuedCount = pending;
     if (pending == null) return; // 查不到就不下结论
     if (pending == 0) {
-      _lastError = '系统没有接下这次排期：检查「设置 → 通知 → 租盾」是否允许通知，'
+      _lastError =
+          '系统没有接下这次排期：检查「设置 → 通知 → 租盾」是否允许通知，'
           '再回来重开一次开关';
     } else if (_lastError?.startsWith('系统没有接下') == true) {
       _lastError = null;

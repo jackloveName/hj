@@ -118,11 +118,7 @@ class ErrorLog extends ChangeNotifier {
   void install() {
     final previous = FlutterError.onError;
     FlutterError.onError = (details) {
-      add(
-        details.exception,
-        stack: details.stack,
-        note: 'Flutter 异常',
-      );
+      add(details.exception, stack: details.stack, note: 'Flutter 异常');
       previous?.call(details);
     };
     PlatformDispatcher.instance.onError = (error, stack) {

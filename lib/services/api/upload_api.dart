@@ -36,7 +36,8 @@ class UploadApi {
     final signed = _firstSigned(
       await profile.preSignUrl(fileNames: [fileName]),
     );
-    final preSignUrl = '${signed['preSignUrl'] ?? signed['preSignedUrl'] ?? ''}';
+    final preSignUrl =
+        '${signed['preSignUrl'] ?? signed['preSignedUrl'] ?? ''}';
     if (preSignUrl.isEmpty) throw ApiException('获取上传地址失败');
 
     await api.putBytes(

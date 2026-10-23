@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import '../data/cloud_bridge.dart';
 import '../data/cloud_ref.dart';
 import '../data/repository.dart';
+import 'api/agreement_api.dart';
 import 'api/api_client.dart';
 import 'api/api_settings.dart';
 import 'api/auth_api.dart';
@@ -54,6 +55,7 @@ class CloudService extends ChangeNotifier implements CloudBridge {
     api.tokenProvider = () => session.token;
     api.onUnauthorized = _handleUnauthorized;
     auth = AuthApi(api);
+    agreement = AgreementApi(api);
     config = ConfigApi(api);
     profile = ProfileApi(api);
     upload = UploadApi(api: api, settings: settings, profile: profile);
@@ -69,6 +71,7 @@ class CloudService extends ChangeNotifier implements CloudBridge {
   final ApiSettings settings;
   final ApiClient api;
   late final AuthApi auth;
+  late final AgreementApi agreement;
   late final ConfigApi config;
   late final ProfileApi profile;
   late final UploadApi upload;

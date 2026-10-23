@@ -60,7 +60,5 @@ Map<String, dynamic>? parseConfigMap(Object? raw) {
     }
     return null;
   }
-  return value is Map
-      ? value.map((k, v) => MapEntry(k.toString(), v))
-      : null;
+  return value is Map ? value.map((k, v) => MapEntry(k.toString(), v)) : null;
 }

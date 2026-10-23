@@ -9,6 +9,7 @@ import '../services/cloud_service.dart';
 import '../services/notification_service.dart';
 import '../services/session.dart';
 import '../theme/tokens.dart';
+import 'agreement/agreement_page.dart';
 import 'app_update_dialog.dart';
 import 'expense/expense_page.dart';
 import 'home/home_page.dart';
@@ -36,7 +37,10 @@ const List<_Tab> _tabs = [
 ];
 
 class AppShell extends StatefulWidget {
-  const AppShell({super.key});
+  const AppShell({super.key, this.agreementPageBuilder});
+
+  /// 测试 / 预览时可以替换 agreement 页面；正式环境使用默认页面。
+  final WidgetBuilder? agreementPageBuilder;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -48,9 +52,22 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   NotificationService? _notifications;
   Session? _session;
   bool _wasLoggedIn = false;
+  bool _wasUpdateEligible = false;
 
   /// 正在查，避免连点标签页 / 前后台来回切时并发请求
   bool _checkingUpdate = false;
+  bool _agreementOpen = false;
+  String? _skippedUpdateVersion;
+  DateTime? _skippedUpdateUntil;
+
+  /// 更新弹框只挂在首页，且只服务已登录并开启借住协议的用户。
+  bool get _canCheckUpdate {
+    final session = _session;
+    return _index == 0 &&
+        session != null &&
+        session.loggedIn &&
+        session.borrowFlagEnabled;
+  }
 
   @override
   void initState() {
@@ -79,29 +96,73 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   /// 进首页时的静默更新检查：有更高版本就弹升级框。
   ///
-  /// 刻意**不记**「这个版本弹过」：每次进首页（进 App、切回首页、从后台回来）
-  /// 都重新问一次服务端，只要有更新就弹 —— 用户点掉之后，再进首页还会弹。
-  /// 请求失败不打扰用户，下次进首页再试。
-  Future<void> _checkUpdateOnHome() async {
-    if (_checkingUpdate) return;
+  /// 普通更新的「稍后更新」和 jianzhirj 一致，在当前运行周期内跳过该版本 24 小时；
+  /// 强制更新不会写入跳过状态。请求失败不打扰用户，下次进首页再试。
+  Future<bool> _checkUpdateOnHome() async {
+    if (!_canCheckUpdate) return false;
+    if (_checkingUpdate) return false;
     _checkingUpdate = true;
     try {
       final raw = await context.read<CloudService>().config.readSystemConfig(
         ApiSettings.appBrand,
       );
-      if (!mounted) return;
+      // 请求期间可能切走标签页、退出登录或收到新的用户资料。
+      if (!mounted || !_canCheckUpdate) return false;
       final info = newerUpdate(raw, kAppVersion);
-      if (info == null) return;
-      await showAppUpdateDialog(
+      if (info == null) {
+        await _openAgreementIfNeeded();
+        return false;
+      }
+      if (!info.blocking && _isUpdateSkipped(info.version)) {
+        await _openAgreementIfNeeded();
+        return false;
+      }
+      final result = await showAppUpdateDialog(
         context: context,
         info: info,
         currentVersion: kAppVersion,
       );
+      if (result == AppUpdateDialogResult.dismissed && !info.blocking) {
+        _rememberSkippedUpdate(info.version);
+      }
+      return true;
     } catch (_) {
       // 后台检查失败不打扰用户，下次回首页再试
+      return false;
     } finally {
       _checkingUpdate = false;
     }
+  }
+
+  Future<void> _openAgreementIfNeeded() async {
+    if (_agreementOpen || !mounted) return;
+    final session = _session;
+    if (session == null || !session.loggedIn || !session.borrowFlagEnabled) {
+      return;
+    }
+    _agreementOpen = true;
+    try {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: widget.agreementPageBuilder ?? (_) => const AgreementPage(),
+        ),
+      );
+    } finally {
+      _agreementOpen = false;
+    }
+  }
+
+  bool _isUpdateSkipped(String version) {
+    final until = _skippedUpdateUntil;
+    return _skippedUpdateVersion == version &&
+        until != null &&
+        DateTime.now().isBefore(until);
+  }
+
+  void _rememberSkippedUpdate(String version) {
+    _skippedUpdateVersion = version;
+    _skippedUpdateUntil = DateTime.now().add(const Duration(hours: 24));
   }
 
   @override
@@ -117,16 +178,27 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       _session?.removeListener(_onSessionChanged);
       _session = session..addListener(_onSessionChanged);
       _wasLoggedIn = session.loggedIn;
+      _wasUpdateEligible = session.borrowFlagEnabled;
     }
   }
 
-  /// 登录成功后回到首页（用户登录进来第一眼应该是首页，而不是停在「我的」）
+  /// 登录成功或用户详情更新时：重新校准首页更新检查的门槛。
   void _onSessionChanged() {
     final loggedIn = _session?.loggedIn ?? false;
-    if (loggedIn == _wasLoggedIn) return;
+    final updateEligible = _session?.borrowFlagEnabled ?? false;
+    final loginChanged = loggedIn != _wasLoggedIn;
+    final becameUpdateEligible = updateEligible && !_wasUpdateEligible;
     _wasLoggedIn = loggedIn;
+    _wasUpdateEligible = updateEligible;
     if (!loggedIn || !mounted) return;
-    _selectTab(0);
+    if (!loginChanged && !becameUpdateEligible) return;
+
+    // 登录接口先返回凭证、用户详情随后才返回时，等 borrowFlag 到位再检查。
+    if (_index != 0) {
+      if (loginChanged) _selectTab(0);
+      return;
+    }
+    _checkUpdateOnHome();
   }
 
   /// 点系统通知进来时，直接落到对应的标签页

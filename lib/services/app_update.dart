@@ -8,20 +8,19 @@ class AppUpdateInfo {
     required this.version,
     this.notes = '',
     this.url = '',
+    this.logoUrl = '',
     this.force = false,
   });
 
   final String version;
   final String notes;
   final String url;
+  final String logoUrl;
 
-  /// 强制更新：弹窗不可关闭
+  /// 强制更新：弹窗不可关闭，与是否配置下载地址无关。
   final bool force;
 
-  /// 要不要真的把用户拦住：**强制更新、而且确实有能用的下载地址**才算。
-  /// 强制却没地址（比如后台还填着占位链接）时，弹窗关不掉就成了死胡同 ——
-  /// 用户既装不上新版、也回不到 App，所以这种情况放行。
-  bool get blocking => force && url.isNotEmpty;
+  bool get blocking => force;
 }
 
 /// 点分版本号比较：a 比 b 新返回正数，相同返回 0
@@ -37,15 +36,17 @@ int compareVersions(String a, String b) {
   return 0;
 }
 
-/// 服务端配置里有没有比 [current] 更新的版本：
-/// 没有配置、拿不到版本号、或者版本不比当前新，都返回 null（就是「没有更新」）。
+/// 服务端配置里有没有比 [current] 更新的版本。
+/// 版本更新提示与下载地址是否配置无关，地址只影响弹窗里的按钮能否打开。
 AppUpdateInfo? newerUpdate(
   Object? rawConfig,
   String current, {
   TargetPlatform? platform,
 }) {
   final info = parseAppUpdate(rawConfig, platform: platform);
-  if (info == null || compareVersions(info.version, current) <= 0) return null;
+  if (info == null || compareVersions(info.version, current) <= 0) {
+    return null;
+  }
   return info;
 }
 
@@ -57,17 +58,16 @@ List<int> _parts(String value) => [
 /// 解析服务端配置。形态不固定（JSON 字符串 / `{paramValue: ...}` / 直接对象），
 /// 尽量宽容地取版本号、更新说明与下载地址；取不到版本号视为「没有更新」。
 ///
-/// 平台后台的更新开关（`iosUpdateType` / `androidUpdateType`，口径由平台确认）：
-/// **0 = 不更新**（后台关掉了，即使版本更高也不弹）、**1 = 提示更新**；
-/// 字段缺失时按「提示更新」走（兼容没有这个开关的写法）。
-/// 平台只定义了 0 和 1，所以这里不把任何非 0 值当「强制更新」——
-/// 强制只认配置里写明的 `force` / `forceUpdate` 这类布尔字段。
+/// 平台后台的更新开关（`iosUpdateType` / `androidUpdateType`，与 jianzhirj 一致）：
+/// **0 = 不更新**、**1 = 普通更新（可稍后）**、**2 = 强制更新**。
+/// 字段缺失时保留通用配置兼容，也继续识别 `force` / `forceUpdate` 等布尔字段。
 AppUpdateInfo? parseAppUpdate(Object? raw, {TargetPlatform? platform}) {
   final map = _unwrap(raw, 0);
   if (map == null) return null;
   final target = platform ?? defaultTargetPlatform;
   final updateSwitch = _updateSwitchOf(map, target);
   if (updateSwitch == 0) return null;
+  final forceByType = updateSwitch == 2;
   final version = _string(map, _versionKeys(target));
   if (version == null || version.trim().isEmpty) return null;
   return AppUpdateInfo(
@@ -80,36 +80,34 @@ AppUpdateInfo? parseAppUpdate(Object? raw, {TargetPlatform? platform}) {
           'desc',
           'description',
           'updateLog',
+          'versionDesc',
+          'iosVersionDesc',
+          'androidVersionDesc',
           'iosUpdateContent',
           'androidUpdateContent',
         ]) ??
         '',
     url: _usableUrl(_string(map, _urlKeys(target))),
-    force: _bool(map, const ['force', 'forceUpdate', 'isForce', 'mustUpdate']),
+    logoUrl: _usableUrl(
+      _string(map, const [
+        'goodsLogo',
+        'appLogo',
+        'logoUrl',
+        'appIcon',
+        'iconUrl',
+      ]),
+    ),
+    force:
+        forceByType ||
+        _bool(map, const ['force', 'forceUpdate', 'isForce', 'mustUpdate']),
   );
 }
-
-/// 后台字段里的占位域名：`https://www.baidu.com` 这种只是「还没填」，
-/// 发给用户只会把人带去无关站点，一律当「没有下载地址」——
-/// 弹窗因此不显示「立即更新」，也就不会把人送错地方。
-const Set<String> _placeholderHosts = {
-  'baidu.com',
-  'example.com',
-  'example.org',
-  'example.net',
-  'test.com',
-  'localhost',
-  '127.0.0.1',
-};
 
 String _usableUrl(String? raw) {
   final value = (raw ?? '').trim();
   if (value.isEmpty) return '';
   final host = Uri.tryParse(value)?.host.toLowerCase() ?? '';
   if (host.isEmpty) return '';
-  for (final placeholder in _placeholderHosts) {
-    if (host == placeholder || host.endsWith('.$placeholder')) return '';
-  }
   return value;
 }
 
@@ -135,14 +133,15 @@ List<String> _urlKeys(TargetPlatform platform) => [
     TargetPlatform.android => const ['androidAppDownloadUrl', 'androidUrl'],
     _ => const <String>[],
   },
+  'h5DownloadUrl',
   'url',
   'downloadUrl',
   'storeUrl',
   'apkUrl',
 ];
 
-/// 平台后台的更新开关：0 = 不更新、1 = 提示更新；字段缺失返回 null
-/// （老写法 / 通用 payload 没有这个开关，按「提示更新」走）。
+/// 平台后台的更新开关：0 = 不更新、1 = 普通更新、2 = 强制更新；
+/// 字段缺失返回 null（老写法 / 通用 payload 没有这个开关时继续兼容）。
 int? _updateSwitchOf(Map<String, dynamic> map, TargetPlatform platform) {
   final keys = switch (platform) {
     TargetPlatform.iOS => const ['iosUpdateType'],
@@ -206,4 +205,3 @@ bool _bool(Map<String, dynamic> map, List<String> keys) {
   }
   return false;
 }
-

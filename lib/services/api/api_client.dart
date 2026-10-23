@@ -188,17 +188,9 @@ class ApiClient {
           .timeout(timeout ?? this.timeout);
       response = await http.Response.fromStream(streamed);
     } on TimeoutException {
-      throw ApiException(
-        '请求超时，请稍后重试',
-        reachable: false,
-        notify: !silent,
-      );
+      throw ApiException('请求超时，请稍后重试', reachable: false, notify: !silent);
     } catch (error) {
-      throw ApiException(
-        '网络连接失败，请检查网络',
-        reachable: false,
-        notify: !silent,
-      );
+      throw ApiException('网络连接失败，请检查网络', reachable: false, notify: !silent);
     }
 
     Object? body;

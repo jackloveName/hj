@@ -14,8 +14,7 @@ class Session extends ChangeNotifier {
   /// [tokenStore] 不传就走本机存储（测试与桌面端都用默认值）；
   /// 移动端由 main.dart 传 SecureTokenStore，把 Token 放进 Keychain / Keystore。
   Session(this._store, {TokenStore? tokenStore})
-    : _tokenStore =
-          tokenStore ?? LocalTokenStore(_store, key: _tokenKey);
+    : _tokenStore = tokenStore ?? LocalTokenStore(_store, key: _tokenKey);
 
   static const String guestScope = 'GuestLocal';
   static const String _tokenKey = 'App-Token';
@@ -38,6 +37,13 @@ class Session extends ChangeNotifier {
   Map<String, dynamic> get user => Map.unmodifiable(_user);
 
   bool get loggedIn => _token.isNotEmpty;
+
+  /// 首页更新检查的业务门槛。后端可能下发数字或字符串，统一按数值 1 判断。
+  bool get borrowFlagEnabled {
+    final raw = _user['borrowFlag'];
+    if (raw is num) return raw == 1;
+    return double.tryParse('${raw ?? ''}'.trim()) == 1;
+  }
 
   /// 是否已选择「游客模式」：首屏据此决定要不要先显示登录页
   bool get guestMode => _store.getString(_guestKey) == 'true';
@@ -132,8 +138,7 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _saveUser() =>
-      _store.setString(_userKey, jsonEncode(_user));
+  Future<void> _saveUser() => _store.setString(_userKey, jsonEncode(_user));
 
   /// 退出登录：清空凭证，数据回到游客作用域
   Future<void> clear() async {

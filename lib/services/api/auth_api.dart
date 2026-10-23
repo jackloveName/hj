@@ -17,8 +17,7 @@ class AuthApi {
     _ => 4,
   };
 
-  static String get osName =>
-      kIsWeb ? 'H5' : defaultTargetPlatform.name;
+  static String get osName => kIsWeb ? 'H5' : defaultTargetPlatform.name;
 
   /// 获取登录短信验证码（无需登录）
   Future<void> sendLoginCode({required String mobile}) async {

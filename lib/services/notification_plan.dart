@@ -60,6 +60,7 @@ List<NotificationPlan> buildNotificationPlan({
   required ReminderSettings config,
   required DateTime now,
   int hour = 9,
+
   /// 往后预排多少个月（交租 / 抄表这类周期性的），0 表示只排最近一次
   int lookAheadMonths = 12,
 }) {
@@ -78,7 +79,9 @@ List<NotificationPlan> buildNotificationPlan({
   }) {
     if (plans.length >= maxPlans) return;
     if (!when.isAfter(now)) return;
-    final id = notificationId('${slot.name}|$propertyId|${when.toIso8601String()}');
+    final id = notificationId(
+      '${slot.name}|$propertyId|${when.toIso8601String()}',
+    );
     if (plans.any((plan) => plan.id == id)) return;
     plans.add(
       NotificationPlan(
