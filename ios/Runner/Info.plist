@@ -41,7 +41,7 @@
 	<key>NSCameraUsageDescription</key>
 	<string>用于拍摄房屋现状，作为入住与退租的取证材料</string>
 	<key>NSContactsUsageDescription</key>
-	<string></string>
+	<string>访问通讯录</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>用于在您使用服务时提供所在位置并完成服务校验</string>
 	<key>NSPhotoLibraryUsageDescription</key>

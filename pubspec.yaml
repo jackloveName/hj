@@ -1,7 +1,7 @@
 name: zudun
 description: "租盾 — 从入住到退租，全程守护你的押金"
 publish_to: "none"
-version: 1.0.4+4
+version: 1.0.4+5
 
 environment:
   sdk: ^3.13.5
