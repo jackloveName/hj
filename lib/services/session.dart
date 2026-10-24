@@ -21,6 +21,7 @@ class Session extends ChangeNotifier {
   static const String _userKey = 'zudun.user_info';
   static const String _authKey = 'zudun.auth';
   static const String _guestKey = 'zudun.guest_mode';
+  static const String _installMarkerKey = 'zudun.install.initialized';
   final LocalStore _store;
 
   /// 访问凭证单独走一条通道：移动端进 Keychain / Keystore
@@ -79,6 +80,7 @@ class Session extends ChangeNotifier {
 
   /// 从本地恢复登录态
   Future<void> restore() async {
+    await _clearOrphanedKeychainAfterReinstall();
     _token = await _tokenStore.read() ?? '';
     final rawUser = _store.getString(_userKey);
     if (rawUser != null && rawUser.isNotEmpty) {
@@ -103,6 +105,25 @@ class Session extends ChangeNotifier {
         _phone = '';
       }
     }
+  }
+
+  /// iOS 卸载 App 不会自动删除 Keychain。用随 App 容器一起删除的安装标记识别
+  /// 全新安装，并清掉上一份安装残留的 Token；普通升级会保留已有登录态。
+  Future<void> _clearOrphanedKeychainAfterReinstall() async {
+    if (_store.getString(_installMarkerKey) == 'true') return;
+    final hasPreviousLocalSession =
+        _store.getString(_authKey) != null ||
+        _store.getString(_userKey) != null ||
+        _store.getString(_guestKey) != null ||
+        _store.getString('zudun.privacy.agreedVersion') != null;
+    if (!hasPreviousLocalSession) {
+      try {
+        await _tokenStore.clear();
+      } catch (error) {
+        debugPrint('清理卸载残留 Token 失败：$error');
+      }
+    }
+    await _store.setString(_installMarkerKey, 'true');
   }
 
   /// 登录成功：保存凭证与账号信息

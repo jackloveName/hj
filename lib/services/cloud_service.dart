@@ -225,7 +225,12 @@ class CloudService extends ChangeNotifier implements CloudBridge {
     } catch (_) {
       // 退出登录以本机为准：即使服务端调用失败也要清干净
     }
+    final scope = session.scope;
+    _pushTimer?.cancel();
+    await _setPending(false);
     await session.clear();
+    // 退出账号时只清本机，不请求删除云端照片或账号数据。
+    await _purgeLocalScope(scope, releaseRemotePhotos: false);
     await _useScopeOf(Session.guestScope);
     _setState(SyncState.local);
   }
@@ -237,6 +242,7 @@ class CloudService extends ChangeNotifier implements CloudBridge {
     final scope = session.scope;
     await repository.purgeLocalMedia(
       keep: _mediaRefsOf(Repository.guestDataKey),
+      releaseRemotePhotos: false,
     );
     // 本机数据键是 `zudun.data.v1.<scope>`（见 _useScopeOf），
     // 用云端键 Session.dataKeyOf 去删本机数据只会删到一个不存在的键，数据其实没被清掉。
@@ -259,19 +265,27 @@ class CloudService extends ChangeNotifier implements CloudBridge {
     );
     await profile.destroyUser();
     // 服务端删除成功后再清本机：账号数据、云端照片缓存、登录态
+    _pushTimer?.cancel();
     await session.clear();
-    await _purgeLocalScope(scope);
+    await _purgeLocalScope(scope, releaseRemotePhotos: false);
     await _useScopeOf(Session.guestScope);
     _setState(SyncState.local);
   }
 
-  /// 清掉某个作用域在本机留下的数据（注销账号时使用）
-  Future<void> _purgeLocalScope(String scope) async {
+  /// 清掉某个作用域在本机留下的账号资料、数据与照片文件。
+  ///
+  /// [releaseRemotePhotos] 只允许在明确要删除云端对象时开启；退出登录、
+  /// 清除本机数据和注销账号都应由各自的服务端操作处理云端数据。
+  Future<void> _purgeLocalScope(
+    String scope, {
+    bool releaseRemotePhotos = false,
+  }) async {
     if (scope == Session.guestScope) return;
-    // 先删照片文件（本机的直接删，云端的清缓存并请求一起删除），再删数据本体；
+    // 先删本机照片文件与云端照片缓存，再删数据本体；
     // 反过来的话数据一没，这些文件就再也没人引用了
     await repository.purgeLocalMedia(
       keep: _mediaRefsOf(Repository.guestDataKey),
+      releaseRemotePhotos: releaseRemotePhotos,
     );
     // 本机账号数据键是 `zudun.data.v1.<scope>`（见 _useScopeOf）：
     // 用云端键 Session.dataKeyOf 去删本机数据只会删到一个不存在的键，

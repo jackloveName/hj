@@ -34,6 +34,7 @@ import 'package:zudun/services/notification_service.dart';
 import 'package:zudun/services/pdf_service.dart';
 import 'package:zudun/services/protocol_service.dart';
 import 'package:zudun/services/session.dart';
+import 'package:zudun/services/token_store.dart';
 import 'package:zudun/services/watermark.dart';
 import 'package:zudun/theme/app_theme.dart';
 import 'package:zudun/theme/tokens.dart';
@@ -146,6 +147,25 @@ class _FakeNotificationChannel implements NotificationChannel {
   Future<bool> openSystemSettings() async {
     openSettingsCount++;
     return true;
+  }
+}
+
+class _FakeTokenStore implements TokenStore {
+  _FakeTokenStore([this.value]);
+
+  String? value;
+  int clearCount = 0;
+
+  @override
+  Future<String?> read() async => value;
+
+  @override
+  Future<void> write(String token) async => value = token;
+
+  @override
+  Future<void> clear() async {
+    clearCount++;
+    value = null;
   }
 }
 
@@ -2342,6 +2362,43 @@ void groupApi() {
       expect(restored.dataKey, 'GuestLocalZuDunData');
     });
 
+    test('卸载重装清理 Keychain 残留，普通升级保留登录态', () async {
+      final temp = Directory.systemTemp.createTempSync('zudun_reinstall_test');
+      addTearDown(() => _cleanTemp(temp));
+      const channel = MethodChannel('plugins.flutter.io/path_provider');
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (call) async => temp.path);
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+
+      final repository = await Repository.open();
+      final tokenStore = _FakeTokenStore('orphaned-keychain-token');
+      final freshInstall = Session(repository.store, tokenStore: tokenStore);
+      await freshInstall.restore();
+
+      expect(
+        tokenStore.clearCount,
+        1,
+        reason: '本地容器为空但 Keychain 有 Token，说明是新安装',
+      );
+      expect(freshInstall.loggedIn, isFalse);
+
+      await freshInstall.saveLogin(
+        token: 'T-after-login',
+        phone: '13800138000',
+        provider: 'code',
+        user: {'borrowFlag': 1},
+      );
+      expect(tokenStore.value, 'T-after-login');
+
+      // 模拟旧版本升级：本地账号仍在，但还没有安装标记。
+      await repository.store.remove('zudun.install.initialized');
+      final upgraded = Session(repository.store, tokenStore: tokenStore);
+      await upgraded.restore();
+      expect(upgraded.loggedIn, isTrue);
+      expect(tokenStore.clearCount, 1, reason: '普通升级不能把现有登录态清掉');
+    });
+
     test('首屏分流：未登录且没选过本机模式时先看登录页', () async {
       final temp = Directory.systemTemp.createTempSync('zudun_gate_test');
       addTearDown(() => _cleanTemp(temp));
@@ -2564,6 +2621,51 @@ void groupApi() {
       expect(session.loggedIn, isFalse);
       expect(await repository.readMedia(ref), isNull, reason: '本机照片文件也要删掉');
       expect(repository.photos, isEmpty);
+      cloud.dispose();
+    });
+
+    test('退出登录会清空本机账号数据和照片，但保留云端数据', () async {
+      final (repository, session, settings, requests) = await setup();
+      final bytes = Uint8List.fromList(List.generate(32, (index) => index + 1));
+      final cloud = CloudService(
+        repository: repository,
+        session: session,
+        settings: settings,
+        httpClient: fakeGateway(requests),
+      );
+      await cloud.signIn(
+        phone: '13800138000',
+        validCode: '123456',
+        byPassword: false,
+      );
+      final accountKey = '${Repository.guestDataKey}.${session.scope}';
+      await repository.addProperty(buildProperty());
+      final ref = await repository.saveMedia(
+        bytes,
+        folder: 'p1',
+        name: 'logout.jpg',
+      );
+      await repository.addPhoto(
+        EvidencePhoto(
+          id: 'ph-logout',
+          propertyId: 'p1',
+          room: '客厅',
+          imageRef: ref,
+          thumbRef: ref,
+          timestamp: DateTime(2026, 10, 1),
+        ),
+      );
+
+      expect(repository.rawDataOf(accountKey), isNotNull);
+      expect(await repository.readMedia(ref), isNotNull);
+
+      await cloud.logout();
+
+      expect(session.loggedIn, isFalse);
+      expect(repository.rawDataOf(accountKey), isNull);
+      expect(repository.properties, isEmpty);
+      expect(repository.photos, isEmpty);
+      expect(await repository.readMedia(ref), isNull);
       cloud.dispose();
     });
 
@@ -9956,6 +10058,12 @@ void groupWidgets() {
     // 服务器地址属于内部配置，不摆在登录页上
     expect(find.text('服务器地址'), findsNothing);
     expect(find.textContaining('让每一次租房'), findsOneWidget);
+
+    // 未勾选协议时点验证码入口仍要给反馈，而不是看起来点不动
+    await tester.tap(find.text('获取验证码'));
+    await tester.pumpAndSettle();
+    expect(find.text('请先勾选下面的《隐私政策》和《平台注册协议》'), findsOneWidget);
+    expect(find.text('请先勾选协议后再获取验证码'), findsOneWidget);
 
     // 按钮文案固定为「登录 / 注册」，未填写时给出轻提示（不是红色错误条）
     await tester.tap(find.text('登录 / 注册').last);

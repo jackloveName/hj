@@ -85,7 +85,12 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> _sendCode() async {
     if (_countdown > 0 || _sending) return;
     // 同意协议之前不向服务端提交手机号
-    final problem = _phoneHint() ?? (_agreed ? null : _agreementHint);
+    if (!_agreed) {
+      _showHint(_agreementHint);
+      zToast(context, '请先勾选协议后再获取验证码');
+      return;
+    }
+    final problem = _phoneHint();
     if (problem != null) {
       _showHint(problem);
       return;
@@ -514,7 +519,8 @@ class _AgreementRow extends StatelessWidget {
                     alignment: PlaceholderAlignment.baseline,
                     baseline: TextBaseline.alphabetic,
                     child: GestureDetector(
-                      onTap: () => showProtocolSheet(context, ProtocolKind.privacy),
+                      onTap: () =>
+                          showProtocolSheet(context, ProtocolKind.privacy),
                       child: Text(
                         '《隐私政策》',
                         style: ZText.caption.copyWith(
@@ -529,7 +535,8 @@ class _AgreementRow extends StatelessWidget {
                     alignment: PlaceholderAlignment.baseline,
                     baseline: TextBaseline.alphabetic,
                     child: GestureDetector(
-                      onTap: () => showProtocolSheet(context, ProtocolKind.agreement),
+                      onTap: () =>
+                          showProtocolSheet(context, ProtocolKind.agreement),
                       child: Text(
                         '《平台注册协议》',
                         style: ZText.caption.copyWith(

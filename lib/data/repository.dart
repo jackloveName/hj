@@ -1028,16 +1028,20 @@ class Repository extends ChangeNotifier {
     await _store.remove(key);
   }
 
-  /// 删除本机这份数据引用到的所有媒体文件（注销账号时用）。
+  /// 删除本机这份数据引用到的所有媒体文件（退出登录 / 清除本机数据时用）。
   ///
-  /// 本机文件直接删；云端引用会清掉本机缓存，并尽力请求服务端一起删除。
+  /// 本机文件直接删，云端引用至少会清掉本机缓存。
+  /// [releaseRemotePhotos] 为 true 时才请求服务端删除云端对象。
   /// [keep] 里的引用会跳过（例如这套照片同时被游客数据引用着）。
-  Future<void> purgeLocalMedia({Set<String> keep = const {}}) async {
+  Future<void> purgeLocalMedia({
+    Set<String> keep = const {},
+    bool releaseRemotePhotos = false,
+  }) async {
     for (final photo in _photos) {
       final shared =
           keep.contains(photo.imageRef) || keep.contains(photo.thumbRef);
       if (shared) continue;
-      await _deletePhotoFiles(photo);
+      await _deletePhotoFiles(photo, releaseRemotePhotos: releaseRemotePhotos);
     }
     _mediaBytes = await _media.usedBytes();
   }
@@ -1048,8 +1052,11 @@ class Repository extends ChangeNotifier {
     await _media.deleteCloudBytes(ref);
   }
 
-  /// 删除一份媒体：本机文件直接删；云端引用清掉缓存并尽力删除云端文件
-  Future<void> _deleteMediaRef(String ref) async {
+  /// 删除一份媒体：本机文件直接删；云端引用清掉本机缓存。
+  Future<void> _deleteMediaRef(
+    String ref, {
+    bool releaseRemotePhotos = true,
+  }) async {
     if (ref.isEmpty) return;
     if (!OssRef.isRemote(ref)) {
       await _media.delete(ref);
@@ -1057,15 +1064,24 @@ class Repository extends ChangeNotifier {
     }
     await _media.deleteCloudBytes(ref);
     final bridge = cloud;
-    if (bridge != null && bridge.enabled) {
+    if (releaseRemotePhotos && bridge != null && bridge.enabled) {
       await bridge.releaseRemoteMedia([ref]);
     }
   }
 
-  Future<void> _deletePhotoFiles(EvidencePhoto photo) async {
-    await _deleteMediaRef(photo.imageRef);
+  Future<void> _deletePhotoFiles(
+    EvidencePhoto photo, {
+    bool releaseRemotePhotos = true,
+  }) async {
+    await _deleteMediaRef(
+      photo.imageRef,
+      releaseRemotePhotos: releaseRemotePhotos,
+    );
     if (photo.thumbRef != photo.imageRef) {
-      await _deleteMediaRef(photo.thumbRef);
+      await _deleteMediaRef(
+        photo.thumbRef,
+        releaseRemotePhotos: releaseRemotePhotos,
+      );
     }
   }
 

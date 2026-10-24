@@ -14,12 +14,12 @@ String maskPhone(String phone) {
   return '${phone.substring(0, 3)}****${phone.substring(phone.length - 4)}';
 }
 
-/// 退出登录：只断开账号，本机数据保留
+/// 退出登录：只断开账号并清空本机数据，云端数据保留
 Future<void> logoutAccount(BuildContext context, CloudService cloud) async {
   final ok = await zConfirm(
     context,
     title: '退出登录',
-    message: '退出后本机数据仍然保留，云端数据不会被删除。',
+    message: '退出后将清除这台设备上的房源、照片和账号缓存，云端数据不会被删除。',
     confirmText: '退出',
   );
   if (!ok || !context.mounted) return;
