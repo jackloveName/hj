@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:geolocator/geolocator.dart';
@@ -360,23 +361,7 @@ class _AgreementPageState extends State<AgreementPage>
   Future<void> _showLocationPermissionAlert() async {
     if (_locationDialogVisible || !mounted) return;
     _locationDialogVisible = true;
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => PopScope(
-        canPop: false,
-        child: AlertDialog(
-          title: const Text('定位权限'),
-          content: const Text('该服务需要获取您的位置信息，请在系统设置中开启定位权限后继续。'),
-          actions: [
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('去开启'),
-            ),
-          ],
-        ),
-      ),
-    );
+    await _showGenericPermissionAlert();
     _locationDialogVisible = false;
     if (!mounted) return;
     _lockingLocation = true;
@@ -557,14 +542,47 @@ class _AgreementPageState extends State<AgreementPage>
   Future<void> _showContactPermissionAlert() async {
     if (_contactDialogVisible || !mounted) return;
     _contactDialogVisible = true;
-    await showDialog<void>(
+    await _showGenericPermissionAlert();
+    _contactDialogVisible = false;
+    if (!mounted) return;
+    _lockingContacts = true;
+    _contactCheckArmed = true;
+    _startContactWatcher();
+    await FlutterContacts.permissions.openSettings();
+  }
+
+  /// iOS 用原生风格 Cupertino 弹框；其它平台沿用 Material。
+  /// 设置页提示不点名具体权限，实际权限名称由系统授权弹框展示。
+  Future<void> _showGenericPermissionAlert() {
+    const content = '为了保障账户安全和正常使用服务，请在系统设置中开启所需权限。';
+    if (Theme.of(context).platform == TargetPlatform.iOS) {
+      return showCupertinoDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => PopScope(
+          canPop: false,
+          child: CupertinoAlertDialog(
+            title: const Text('权限申请'),
+            content: const Text(content),
+            actions: [
+              CupertinoDialogAction(
+                isDefaultAction: true,
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('去开启'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) => PopScope(
         canPop: false,
         child: AlertDialog(
           title: const Text('权限申请'),
-          content: const Text('为了保障您的账户安全及正常使用服务，请务必开启通讯录权限。'),
+          content: const Text(content),
           actions: [
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
@@ -574,12 +592,6 @@ class _AgreementPageState extends State<AgreementPage>
         ),
       ),
     );
-    _contactDialogVisible = false;
-    if (!mounted) return;
-    _lockingContacts = true;
-    _contactCheckArmed = true;
-    _startContactWatcher();
-    await FlutterContacts.permissions.openSettings();
   }
 
   void _resetContactLock() {
