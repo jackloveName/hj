@@ -8,7 +8,7 @@ cd "${ROOT}"
 mkdir -p "${SYMBOL_DIR}"
 
 flutter pub get
-flutter build ipa \
+BYPASS_PERMISSION_LOCATION_ALWAYS=1 flutter build ipa \
   --release \
   --obfuscate \
   --split-debug-info="${SYMBOL_DIR}" \
