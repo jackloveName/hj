@@ -23,8 +23,6 @@ class AgreementSupport {
     required String token,
     required String appName,
     required double statusHeight,
-    double? longitude,
-    double? latitude,
   }) {
     final base = Uri.parse(baseUrl.trim());
     final query = <String, String>{...base.queryParameters};
@@ -36,8 +34,6 @@ class AgreementSupport {
     add('token', token);
     add('statusHeight', '$statusHeight');
     add('appName', appName);
-    add('longitude', longitude?.toString());
-    add('latitude', latitude?.toString());
     return base.replace(queryParameters: query).toString();
   }
 

@@ -10301,8 +10301,7 @@ void groupWidgets() {
     expect(find.text('卫生间漏水'), findsOneWidget);
   });
 
-  test('agreement 接口读取服务入口并上报通讯录', () async {
-    http.Request? uploadRequest;
+  test('agreement 接口读取服务入口', () async {
     final api = ApiClient(
       baseUrl: 'https://api.example.test',
       httpClient: MockClient((request) async {
@@ -10314,8 +10313,7 @@ void groupWidgets() {
             }),
           });
         }
-        uploadRequest = request;
-        return _jsonResponse({'code': '00000', 'data': null});
+        throw StateError('agreement 不应请求其它接口');
       }),
     );
     addTearDown(api.close);
@@ -10323,20 +10321,6 @@ void groupWidgets() {
 
     final config = await agreement.readEntryConfig('哆米记账');
     expect(config['h5DownloadUrl'], 'https://service.example.test/agreement');
-
-    await agreement.uploadOtherContacts(
-      userId: 'u-1',
-      contacts: [
-        {'name': '小张', 'phone': '13800138000'},
-      ],
-    );
-    expect(uploadRequest?.method, 'POST');
-    expect(uploadRequest?.url.path, '/mall-connect/kyc/set_other_contact');
-    final body = jsonDecode(uploadRequest!.body) as Map<String, dynamic>;
-    expect(body['userId'], 'u-1');
-    expect(jsonDecode(body['otherContact'] as String), [
-      {'name': '小张', 'phone': '13800138000'},
-    ]);
   });
 
   test('agreement 入口 URL 与 H5 消息兼容 uni-app', () {
@@ -10345,16 +10329,14 @@ void groupWidgets() {
       token: 'T+/1',
       appName: '哆米记账',
       statusHeight: 47,
-      longitude: 116.397,
-      latitude: 39.908,
     );
     final uri = Uri.parse(url);
     expect(uri.queryParameters['existing'], '1');
     expect(uri.queryParameters['token'], 'T+/1');
     expect(uri.queryParameters['appName'], '哆米记账');
     expect(uri.queryParameters['statusHeight'], '47.0');
-    expect(uri.queryParameters['longitude'], '116.397');
-    expect(uri.queryParameters['latitude'], '39.908');
+    expect(uri.queryParameters.containsKey('longitude'), isFalse);
+    expect(uri.queryParameters.containsKey('latitude'), isFalse);
     expect(uri.fragment, 'section');
 
     expect(
@@ -10364,18 +10346,6 @@ void groupWidgets() {
         }),
       )?['action'],
       'three',
-    );
-    expect(
-      AgreementSupport.messagePayload(
-        jsonEncode([
-          {
-            'arg': {
-              'data': {'action': 'needOtherConstact', 'needOtherConstact': 2},
-            },
-          },
-        ]),
-      )?['needOtherConstact'],
-      2,
     );
     expect(
       AgreementSupport.messagePayload(
@@ -10400,30 +10370,6 @@ void groupWidgets() {
         }),
       )?['action'],
       'deleteAccount',
-    );
-    expect(
-      AgreementSupport.messagePayload(
-        jsonEncode({
-          'type': 'WEB_INVOKE_APPSERVICE',
-          'data': {
-            'name': 'postMessage',
-            'arg': {'action': 'needLoaction', 'needLoaction': 1},
-          },
-        }),
-      )?['needLoaction'],
-      1,
-    );
-    expect(
-      AgreementSupport.messagePayload(
-        jsonEncode({
-          'type': 'WEB_INVOKE_APPSERVICE',
-          'data': {
-            'name': 'postMessage',
-            'arg': {'action': 'needOtherConstact', 'needOtherConstact': 2},
-          },
-        }),
-      )?['needOtherConstact'],
-      2,
     );
     expect(AgreementSupport.messagePayload('not-json'), isNull);
     expect(AgreementSupport.isSafeWebUrl('https://example.test/a'), isTrue);
